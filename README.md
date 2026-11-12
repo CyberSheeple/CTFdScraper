@@ -82,8 +82,10 @@ python3 main.py \
 ## 🧰 Extra Options
 
 * `--nofiles` – Skip downloading files, just save challenge descriptions.
-* `--nooverwrite` – Don't overwrite existing `description.md` files.
+* `--nooverwrite` – Don't overwrite an existing `description.md`, and skip that challenge's files.
 * `--scoreboard` – Also save the standings. Works with `.env` or command-line credentials. A hidden scoreboard is a warning when challenges were downloaded too, and a failure when the scoreboard was the only request.
+
+These flags apply whether you authenticate with `.env` or with command-line arguments.
 
 ---
 
