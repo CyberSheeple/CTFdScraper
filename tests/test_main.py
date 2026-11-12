@@ -27,9 +27,9 @@ class FakeHTTP:
         self.calls = []
         self.requests = []
 
-    def get(self, url, headers=None, cookies=None):
+    def get(self, url, headers=None, cookies=None, params=None):
         self.calls.append(url)
-        self.requests.append({"url": url, "headers": headers or {}, "cookies": cookies})
+        self.requests.append({"url": url, "headers": headers or {}, "cookies": cookies, "params": params})
         if url not in self.routes:
             raise AssertionError(f"unexpected GET {url}")
         return self.routes[url]
@@ -172,6 +172,23 @@ def routes(scoreboard_status=200, scoreboard_payload=None):
         ),
         "https://ctf.example/files/abc/note.txt": Response(200, content=b"note"),
         "https://ctf.example/api/v1/scoreboard": Response(scoreboard_status, scoreboard_payload),
+        "https://ctf.example/api/v1/scoreboard/top/10": Response(
+            200,
+            {
+                "success": True,
+                "data": {
+                    "1": {
+                        "id": 1,
+                        "name": "Alpha|Team",
+                        "score": 200,
+                        "solves": [
+                            {"value": 100, "date": "2026-11-12T00:00:00Z"},
+                            {"value": 100, "date": "2026-11-12T01:00:00Z"},
+                        ],
+                    }
+                },
+            },
+        ),
     }
 
 
@@ -197,8 +214,16 @@ class ScoreboardTests(unittest.TestCase):
                 markdown = handle.read()
             self.assertIn("| 1 | Alpha\\|Team | 200 | Open |", markdown)
             self.assertIn("| 2 | Beta | 50 |  |", markdown)
+            with open(os.path.join(tmp, "scoreboard.html"), encoding="utf-8") as handle:
+                html = handle.read()
+            self.assertIn("Alpha|Team", html)
+            self.assertIn("2026-11-12T00:00:00Z", html)
+            self.assertIn("renderGraph", html)
+            self.assertNotIn("src=", html)
+            self.assertEqual(document["top"]["all"]["1"]["name"], "Alpha|Team")
             self.assertTrue(os.path.exists(os.path.join(tmp, "web", "Hello", "description.md")))
             self.assertIn("https://ctf.example/api/v1/scoreboard", http.calls)
+            self.assertIn("https://ctf.example/api/v1/scoreboard/top/10", http.calls)
 
     def test_scoreboard_stays_off_without_the_flag(self):
         http = FakeHTTP(routes())
@@ -210,6 +235,7 @@ class ScoreboardTests(unittest.TestCase):
                 http=http,
             )
             self.assertFalse(os.path.exists(os.path.join(tmp, "scoreboard.json")))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "scoreboard.html")))
             self.assertNotIn("https://ctf.example/api/v1/scoreboard", http.calls)
             self.assertTrue(os.path.exists(os.path.join(tmp, "web", "Hello", "note.txt")))
 
@@ -288,6 +314,63 @@ class ScoreboardTests(unittest.TestCase):
         self.assertEqual(scoreboard_call["headers"]["Authorization"], f"Token {SECRET}")
         self.assertEqual(scoreboard_call["headers"]["Content-Type"], "application/json")
         self.assertIsNone(scoreboard_call["cookies"])
+
+    def test_offline_page_escapes_names_and_filters_brackets(self):
+        rows = [
+            {
+                "pos": 1,
+                "name": "<script>alert(1)</script>",
+                "score": 200,
+                "account_type": "team",
+                "bracket_id": 4,
+                "bracket_name": "Open",
+                "members": [{"name": "Ada", "score": 200}],
+            },
+            {
+                "pos": 2,
+                "name": "Beta",
+                "score": 50,
+                "account_type": "team",
+                "bracket_id": 9,
+                "bracket_name": "Student",
+            },
+        ]
+        http = FakeHTTP(routes(200, {"success": True, "data": rows}))
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+                now=NOW,
+            )
+            with open(os.path.join(tmp, "scoreboard.html"), encoding="utf-8") as handle:
+                html = handle.read()
+        self.assertNotIn("<script>alert", html)
+        self.assertIn("\\u003cscript", html)
+        self.assertIn("Ada", html)
+        top_calls = [call for call in http.requests if call["url"].endswith("/top/10")]
+        self.assertEqual(
+            [call["params"] for call in top_calls],
+            [None, {"bracket_id": 4}, {"bracket_id": 9}],
+        )
+
+    def test_missing_score_graph_still_writes_the_offline_page(self):
+        payload = {"success": True, "data": ROWS}
+        http = FakeHTTP(routes(200, payload))
+        http.routes["https://ctf.example/api/v1/scoreboard/top/10"] = Response(404, text="missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+                now=NOW,
+            )
+            with open(os.path.join(tmp, "scoreboard.json"), encoding="utf-8") as handle:
+                document = json.load(handle)
+            self.assertEqual(document["top"]["all"], {})
+            self.assertTrue(os.path.exists(os.path.join(tmp, "scoreboard.html")))
 
 
 SECRET = "ctfd_super_secret_value"

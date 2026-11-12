@@ -36,7 +36,7 @@ def build_parser():
     parser.add_argument(
         "--scoreboard",
         action="store_true",
-        help="Also save output/scoreboard.json and output/scoreboard.md",
+        help="Also save output/scoreboard.json, output/scoreboard.md, and offline output/scoreboard.html",
     )
     parser.add_argument(
         "--list-tokens",
@@ -123,10 +123,12 @@ def resolve_auth(args, env, http):
     raise SystemExit(1)
 
 
-def api_get(http, url, headers, cookies):
+def api_get(http, url, headers, cookies, params=None):
     kwargs = {"headers": headers}
     if cookies:
         kwargs["cookies"] = cookies
+    if params:
+        kwargs["params"] = params
     return http.get(url, **kwargs)
 
 
@@ -231,6 +233,306 @@ def scoreboard_rows(response, challenges_requested):
     raise SystemExit(1)
 
 
+def scoreboard_detail(response):
+    """Return the top-score graph payload, or None when the endpoint did not succeed."""
+    if response.status_code != 200:
+        return None
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def fetch_scoreboard_top(url, headers, cookies, http, rows):
+    """Top-10 graph for the whole board, plus one graph per bracket on the board."""
+    response = api_get(http, f"{url}/api/v1/scoreboard/top/10", headers, cookies)
+    detail = scoreboard_detail(response)
+    if detail is None:
+        print(
+            f"[-] Score graph is unavailable ({response.status_code}). "
+            "The offline scoreboard will list standings only."
+        )
+        detail = {}
+    brackets = {}
+    seen = []
+    for row in rows:
+        bracket_id = row.get("bracket_id")
+        if bracket_id is None or bracket_id in seen:
+            continue
+        seen.append(bracket_id)
+        bracket_response = api_get(
+            http,
+            f"{url}/api/v1/scoreboard/top/10",
+            headers,
+            cookies,
+            params={"bracket_id": bracket_id},
+        )
+        bracket_detail = scoreboard_detail(bracket_response)
+        if bracket_detail is None:
+            print(
+                f"[-] Score graph for bracket {bracket_id} is unavailable "
+                f"({bracket_response.status_code})."
+            )
+            continue
+        brackets[str(bracket_id)] = bracket_detail
+    return {"all": detail, "brackets": brackets}
+
+
+SCOREBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoreboard</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: system-ui, sans-serif; line-height: 1.4; }
+  header, main { max-width: 960px; margin: 0 auto; padding: 1.25rem; }
+  header { padding-bottom: 0; }
+  h1 { margin: 0 0 .25rem; }
+  .meta { margin: 0; opacity: .7; }
+  .pills { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+  .pills button { border: 1px solid #888; background: transparent; border-radius: 999px; padding: .35rem .8rem; cursor: pointer; }
+  .pills button.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  svg { width: 100%; height: 320px; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: .75rem 1rem; margin: .5rem 0 1rem; font-size: .9rem; }
+  .swatch { display: inline-block; width: .75rem; height: .75rem; margin-right: .35rem; vertical-align: middle; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: .55rem .7rem; text-align: center; }
+  td.name, th.name { text-align: left; }
+  tbody tr:nth-child(even) { background: rgba(127, 127, 127, .12); }
+  .badge { display: inline-block; margin-left: .5rem; padding: .05rem .4rem; border-radius: .4rem; background: rgba(127, 127, 127, .25); font-size: .8rem; }
+  .members { display: block; opacity: .7; font-size: .85rem; }
+  .empty { text-align: center; opacity: .7; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Scoreboard</h1>
+  <p class="meta" id="fetched"></p>
+</header>
+<main>
+  <div id="graph"></div>
+  <div id="pills" class="pills"></div>
+  <div id="board"></div>
+</main>
+<script type="application/json" id="scoreboard-data">/*SCOREBOARD*/</script>
+<script>
+(function () {
+  var data = JSON.parse(document.getElementById("scoreboard-data").textContent);
+  var standings = data.data || [];
+  var active = null;
+
+  function text(parent, value) {
+    parent.appendChild(document.createTextNode(value == null ? "" : String(value)));
+  }
+
+  function color(name) {
+    var hash = 0;
+    var i;
+    for (i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+    return "hsl(" + (hash % 360) + " 65% 45%)";
+  }
+
+  function brackets() {
+    var seen = {};
+    var list = [];
+    standings.forEach(function (row) {
+      if (row.bracket_id == null || seen[row.bracket_id]) return;
+      seen[row.bracket_id] = true;
+      list.push({id: row.bracket_id, name: row.bracket_name || String(row.bracket_id)});
+    });
+    return list;
+  }
+
+  function visible() {
+    return standings.filter(function (row) {
+      return active == null || String(row.bracket_id) === String(active);
+    });
+  }
+
+  function series() {
+    var top = data.top || {};
+    var places = active == null ? top.all : (top.brackets || {})[String(active)];
+    if (!places) return [];
+    return Object.keys(places).map(function (key) {
+      var place = places[key] || {};
+      var total = 0;
+      var points = (place.solves || []).map(function (solve) {
+        total += Number(solve.value) || 0;
+        return {t: Date.parse(solve.date), y: total};
+      }).filter(function (point) { return !isNaN(point.t); });
+      return {name: place.name || "", color: color((place.name || "") + (place.id || "")), points: points};
+    }).filter(function (item) { return item.points.length; });
+  }
+
+  function svgEl(name) {
+    return document.createElementNS("http://www.w3.org/2000/svg", name);
+  }
+
+  function renderGraph() {
+    var host = document.getElementById("graph");
+    host.textContent = "";
+    var lines = series();
+    if (!lines.length) return;
+    var width = 800;
+    var height = 320;
+    var pad = {left: 52, right: 16, top: 16, bottom: 36};
+    var minT = Infinity;
+    var maxT = -Infinity;
+    var maxY = 0;
+    lines.forEach(function (line) {
+      line.points.forEach(function (point) {
+        if (point.t < minT) minT = point.t;
+        if (point.t > maxT) maxT = point.t;
+        if (point.y > maxY) maxY = point.y;
+      });
+    });
+    if (minT === maxT) maxT = minT + 1;
+    if (maxY === 0) maxY = 1;
+    function x(t) {
+      return pad.left + (t - minT) / (maxT - minT) * (width - pad.left - pad.right);
+    }
+    function y(value) {
+      return pad.top + (1 - value / maxY) * (height - pad.top - pad.bottom);
+    }
+    var svg = svgEl("svg");
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+    svg.setAttribute("role", "img");
+    var label = svgEl("title");
+    text(label, "Top scores over time");
+    svg.appendChild(label);
+    var axis = svgEl("path");
+    axis.setAttribute("d", "M" + pad.left + " " + pad.top + "V" + (height - pad.bottom) + "H" + (width - pad.right));
+    axis.setAttribute("fill", "none");
+    axis.setAttribute("stroke", "currentColor");
+    svg.appendChild(axis);
+    lines.forEach(function (line) {
+      var path = svgEl("polyline");
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", line.color);
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("points", line.points.map(function (point) {
+        return x(point.t) + "," + y(point.y);
+      }).join(" "));
+      svg.appendChild(path);
+    });
+    var maxLabel = svgEl("text");
+    maxLabel.setAttribute("x", "4");
+    maxLabel.setAttribute("y", pad.top + 4);
+    maxLabel.setAttribute("font-size", "12");
+    maxLabel.setAttribute("fill", "currentColor");
+    text(maxLabel, String(maxY));
+    svg.appendChild(maxLabel);
+    host.appendChild(svg);
+    var legend = document.createElement("div");
+    legend.className = "legend";
+    lines.forEach(function (line) {
+      var item = document.createElement("span");
+      var swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = line.color;
+      item.appendChild(swatch);
+      text(item, line.name);
+      legend.appendChild(item);
+    });
+    host.appendChild(legend);
+  }
+
+  function renderTable() {
+    var host = document.getElementById("board");
+    var rows = visible();
+    host.textContent = "";
+    if (!rows.length) {
+      var empty = document.createElement("p");
+      empty.className = "empty";
+      text(empty, "Scoreboard is empty");
+      host.appendChild(empty);
+      return;
+    }
+    var table = document.createElement("table");
+    var head = document.createElement("tr");
+    ["Place", rows[0].account_type || "Account", "Score"].forEach(function (label, index) {
+      var cell = document.createElement("th");
+      if (index === 1) cell.className = "name";
+      text(cell, label);
+      head.appendChild(cell);
+    });
+    var thead = document.createElement("thead");
+    thead.appendChild(head);
+    table.appendChild(thead);
+    var body = document.createElement("tbody");
+    rows.forEach(function (row, index) {
+      var tr = document.createElement("tr");
+      var place = document.createElement("th");
+      text(place, index + 1);
+      var name = document.createElement("td");
+      name.className = "name";
+      text(name, row.name || "");
+      if (row.bracket_name) {
+        var badge = document.createElement("span");
+        badge.className = "badge";
+        text(badge, row.bracket_name);
+        name.appendChild(badge);
+      }
+      if (row.members && row.members.length) {
+        var members = document.createElement("span");
+        members.className = "members";
+        text(members, row.members.map(function (member) {
+          return (member.name || "") + " (" + (member.score == null ? "" : member.score) + ")";
+        }).join(", "));
+        name.appendChild(members);
+      }
+      var score = document.createElement("td");
+      text(score, row.score == null ? "" : row.score);
+      tr.appendChild(place);
+      tr.appendChild(name);
+      tr.appendChild(score);
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    host.appendChild(table);
+  }
+
+  function renderPills() {
+    var host = document.getElementById("pills");
+    var items = brackets();
+    host.textContent = "";
+    if (!items.length) return;
+    function add(label, id) {
+      var button = document.createElement("button");
+      button.type = "button";
+      if (String(active) === String(id) || (active == null && id == null)) button.className = "active";
+      text(button, label);
+      button.addEventListener("click", function () {
+        active = id;
+        render();
+      });
+      host.appendChild(button);
+    }
+    add("All", null);
+    items.forEach(function (item) { add(item.name, item.id); });
+  }
+
+  function render() {
+    renderGraph();
+    renderPills();
+    renderTable();
+  }
+
+  text(document.getElementById("fetched"), "Snapshot " + (data.fetched_at || ""));
+  render();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+def scoreboard_html(document):
+    payload = json.dumps(document, ensure_ascii=True).replace("<", "\\u003c")
+    return SCOREBOARD_HTML.replace("/*SCOREBOARD*/", payload)
+
+
 def scoreboard_markdown(rows):
     lines = [
         "# Scoreboard",
@@ -251,15 +553,22 @@ def write_scoreboard(url, headers, cookies, output_dir, http, challenges_request
     if rows is None:
         return
     os.makedirs(output_dir, exist_ok=True)
-    document = {"fetched_at": now.isoformat(), "data": rows}
+    document = {
+        "fetched_at": now.isoformat(),
+        "data": rows,
+        "top": fetch_scoreboard_top(url, headers, cookies, http, rows),
+    }
     json_path = os.path.join(output_dir, "scoreboard.json")
     md_path = os.path.join(output_dir, "scoreboard.md")
+    html_path = os.path.join(output_dir, "scoreboard.html")
     with open(json_path, "w", encoding="utf-8") as handle:
         json.dump(document, handle, indent=2)
         handle.write("\n")
     with open(md_path, "w", encoding="utf-8") as handle:
         handle.write(scoreboard_markdown(rows))
-    print(f"[+] Wrote scoreboard to {json_path} and {md_path}")
+    with open(html_path, "w", encoding="utf-8") as handle:
+        handle.write(scoreboard_html(document))
+    print(f"[+] Wrote scoreboard to {json_path}, {md_path}, and {html_path}")
 
 
 def main(argv=None, env_path=".env", output_dir="output", http=requests, now=None, challenges_requested=True):

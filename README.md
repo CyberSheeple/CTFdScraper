@@ -100,7 +100,7 @@ python3 main.py --token your_access_token --url https://your-ctfd-url.com --list
 
 * `--nofiles` – Skip downloading files, just save challenge descriptions.
 * `--nooverwrite` – Don't overwrite an existing `description.md`, and skip that challenge's files.
-* `--scoreboard` – Also save the standings. Works with `.env` or command-line credentials. [Score Visibility](https://docs.ctfd.io/docs/settings/visibility-settings/#score-visibility) controls who can read them: Public, Private, Hidden, or Admins Only. A 403 (Private or Hidden) or 404 (Admins Only) is a warning when challenges were downloaded too, and a failure when the scoreboard was the only request.
+* `--scoreboard` – Also save the standings, including `scoreboard.html` for offline viewing. Open that file in a browser with no network: it recreates the standings table, bracket filters, and the top-10 score graph. Works with `.env` or command-line credentials. [Score Visibility](https://docs.ctfd.io/docs/settings/visibility-settings/#score-visibility) controls who can read them: Public, Private, Hidden, or Admins Only. A 403 (Private or Hidden) or 404 (Admins Only) is a warning when challenges were downloaded too, and a failure when the scoreboard was the only request.
 
 These flags apply whether you authenticate with `.env` or with command-line arguments.
 
@@ -121,7 +121,7 @@ This scraper follows that contract as shipped in [CTFd 3.8.9](https://github.com
 * Token header, honored when the request is JSON: [`CTFd/utils/initialization/__init__.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/utils/initialization/__init__.py#L341-L355)
 * `GET /api/v1/tokens`: [`CTFd/api/v1/tokens.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/tokens.py)
 * `GET /api/v1/challenges`: [`CTFd/api/v1/challenges.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/challenges.py)
-* `GET /api/v1/scoreboard`: [`CTFd/api/v1/scoreboard.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/scoreboard.py). Who may call it is [Score Visibility](https://docs.ctfd.io/docs/settings/visibility-settings/#score-visibility), enforced in [`check_score_visibility`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/utils/decorators/visibility.py#L16-L53): Public returns the standings, Private returns them for a logged-in account and 403 otherwise, Hidden returns 403 for non-admins, and Admins Only returns 404 for non-admins. The same route also checks account visibility.
+* `GET /api/v1/scoreboard` and `GET /api/v1/scoreboard/top/10`: [`CTFd/api/v1/scoreboard.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/scoreboard.py). The list is the standings table. `top/10` is the score graph, requested again with `bracket_id` for each bracket. Who may call them is [Score Visibility](https://docs.ctfd.io/docs/settings/visibility-settings/#score-visibility), enforced in [`check_score_visibility`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/utils/decorators/visibility.py#L16-L53): Public returns the standings, Private returns them for a logged-in account and 403 otherwise, Hidden returns 403 for non-admins, and Admins Only returns 404 for non-admins. The same routes also check account visibility.
 
 A running instance publishes the spec for its own build at `/api/v1/swagger.json`. The public demo spec is [demo.ctfd.io/api/v1/swagger.json](https://demo.ctfd.io/api/v1/swagger.json).
 
@@ -135,6 +135,7 @@ All content will be saved under the `output/` directory like this:
 output/
 ├── scoreboard.json    # with --scoreboard
 ├── scoreboard.md      # with --scoreboard
+├── scoreboard.html    # with --scoreboard; open offline in a browser
 └── category/
     └── challenge_name/
         ├── description.md
