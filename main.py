@@ -34,6 +34,17 @@ def build_parser():
         help="Skip overwriting existing description.md files",
     )
     parser.add_argument(
+        "--notifications",
+        action="store_true",
+        help="Also save output/notifications.json and output/notifications.md",
+    )
+    parser.add_argument(
+        "--since-id",
+        type=int,
+        default=None,
+        help="With --notifications, return notifications with a higher id",
+    )
+    parser.add_argument(
         "--scoreboard",
         action="store_true",
         help="Also save output/scoreboard.json, output/scoreboard.md, and offline output/scoreboard.html",
@@ -203,6 +214,62 @@ def scrape_challenges(url, headers, cookies, nofiles, nooverwrite, output_dir, h
             with open(file_path, "wb") as handle:
                 handle.write(file_data.content)
             print(f"[+] Downloaded {file_name} for challenge {challenge['name']}.")
+
+
+def notification_records(payload):
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        return []
+    records = []
+    for row in data:
+        records.append(
+            {
+                "id": row.get("id"),
+                "title": row.get("title") or "",
+                "date": row.get("date") or "",
+                "content": row.get("content") or "",
+            }
+        )
+    return records
+
+
+def notifications_markdown(records):
+    lines = ["# Notifications", ""]
+    if not records:
+        lines.append("No notifications.")
+        lines.append("")
+    for record in records:
+        lines.extend(
+            [
+                f"## {record['title']}",
+                "",
+                f"- id: {record['id']}",
+                f"- date: {record['date']}",
+                "",
+                record["content"],
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def write_notifications(url, headers, cookies, output_dir, http, since_id, now):
+    params = {"since_id": since_id} if since_id is not None else None
+    response = api_get(http, f"{url}/api/v1/notifications", headers, cookies, params)
+    if response.status_code != 200:
+        print(f"[-] Failed to retrieve notifications: {response.status_code} - {response.text}")
+        raise SystemExit(1)
+    records = notification_records(response.json())
+    os.makedirs(output_dir, exist_ok=True)
+    document = {"fetched_at": now.isoformat(), "data": records}
+    json_path = os.path.join(output_dir, "notifications.json")
+    md_path = os.path.join(output_dir, "notifications.md")
+    with open(json_path, "w", encoding="utf-8") as handle:
+        json.dump(document, handle, indent=2)
+        handle.write("\n")
+    with open(md_path, "w", encoding="utf-8") as handle:
+        handle.write(notifications_markdown(records))
+    print(f"[+] Wrote notifications to {json_path} and {md_path}")
 
 
 def response_message(response):
@@ -464,6 +531,16 @@ def main(argv=None, env_path=".env", output_dir="output", http=requests, now=Non
         return
     if challenges_requested:
         scrape_challenges(url, headers, cookies, args.nofiles, args.nooverwrite, output_dir, http)
+    if args.notifications:
+        write_notifications(
+            url,
+            headers,
+            cookies,
+            output_dir,
+            http,
+            args.since_id,
+            now or datetime.now(timezone.utc),
+        )
     if args.scoreboard:
         write_scoreboard(
             url,

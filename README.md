@@ -100,6 +100,8 @@ python3 main.py --token your_access_token --url https://your-ctfd-url.com --list
 
 * `--nofiles` – Skip downloading files, just save challenge descriptions.
 * `--nooverwrite` – Don't overwrite an existing `description.md`, and skip that challenge's files.
+* `--notifications` – Also save CTFd announcements. Works with `.env` or command-line credentials.
+* `--since-id N` – With `--notifications`, ask for announcements whose id is greater than N.
 * `--scoreboard` – Also save the standings, including `scoreboard.html` for offline viewing. Open that file in a browser with no network. The page follows [CTFd's scoreboard template](https://github.com/CTFd/CTFd/blob/master/CTFd/themes/core/templates/scoreboard.html): a dark jumbotron, the score graph, bracket pills when the event has brackets, and a striped Place / Team-or-User / Score table. Names link to the account page. The graph asks for the top 50, which is as far as `GET /api/v1/scoreboard/top/<count>` goes, and uses the top 10 when that larger graph is unavailable. Three views change both the graph and the table: Top 50 (or Top 10 after that fallback), Rivals ±5 around the signed-in team or user, and Full (a paged table plus a graph of every account). Bracket filters still narrow the active view. Works with `.env` or command-line credentials. [Score Visibility](https://docs.ctfd.io/docs/settings/visibility-settings/#score-visibility) controls who can read them: Public, Private, Hidden, or Admins Only. A 403 (Private or Hidden) or 404 (Admins Only) is a warning when challenges were downloaded too, and a failure when the scoreboard was the only request.
 
 These flags apply whether you authenticate with `.env` or with command-line arguments.
@@ -108,7 +110,7 @@ These flags apply whether you authenticate with `.env` or with command-line argu
 
 ## 🔌 REST API
 
-Challenge downloads, `--scoreboard`, and `--list-tokens` call CTFd's REST API under `/api/v1`.
+Challenge downloads, `--notifications`, `--scoreboard`, and `--list-tokens` call CTFd's REST API under `/api/v1`.
 
 The docs site keeps a single current copy of the guide and the endpoint reference:
 
@@ -121,6 +123,7 @@ This scraper follows that contract as shipped in [CTFd 3.8.9](https://github.com
 * Token header, honored when the request is JSON: [`CTFd/utils/initialization/__init__.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/utils/initialization/__init__.py#L341-L355)
 * `GET /api/v1/tokens`: [`CTFd/api/v1/tokens.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/tokens.py)
 * `GET /api/v1/challenges`: [`CTFd/api/v1/challenges.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/challenges.py)
+* `GET /api/v1/notifications`: [`CTFd/api/v1/notifications.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/notifications.py)
 * `GET /api/v1/scoreboard`, `GET /api/v1/scoreboard/top/50`, and `GET /api/v1/scoreboard/top/10`: [`CTFd/api/v1/scoreboard.py`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/api/v1/scoreboard.py). The list is the standings table. `top/50` is the score graph; CTFd refuses a count above 50, and the core theme's own page only draws 10. Each bracket requests `top/50` with `bracket_id`, then `top/10` if the larger graph is missing. Accounts outside that slice are filled from `GET /api/v1/users/<id>/solves` and `/awards`, or the team equivalents. `GET /api/v1/users/me` finds the signed-in account for the rivals window; a team scoreboard uses that user's `team_id`. Who may call the scoreboard is [Score Visibility](https://docs.ctfd.io/docs/settings/visibility-settings/#score-visibility), enforced in [`check_score_visibility`](https://github.com/CTFd/CTFd/blob/3.8.9/CTFd/utils/decorators/visibility.py#L16-L53): Public returns the standings, Private returns them for a logged-in account and 403 otherwise, Hidden returns 403 for non-admins, and Admins Only returns 404 for non-admins. The same routes also check account visibility.
 
 A running instance publishes the spec for its own build at `/api/v1/swagger.json`. The public demo spec is [demo.ctfd.io/api/v1/swagger.json](https://demo.ctfd.io/api/v1/swagger.json).
@@ -133,6 +136,8 @@ All content will be saved under the `output/` directory like this:
 
 ```
 output/
+├── notifications.json    # with --notifications
+├── notifications.md      # with --notifications
 ├── scoreboard.json    # with --scoreboard
 ├── scoreboard.md      # with --scoreboard
 ├── scoreboard.html    # with --scoreboard; open offline in a browser
