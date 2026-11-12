@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from dotenv import dotenv_values
 
 DEFAULT_URL = "https://icoblue2025.ctfd.io"
-ENV_KEYS = ("SESSION", "USERNAME", "PASSWORD", "URL")
+ENV_KEYS = ("CTFD_TOKEN", "SESSION", "USERNAME", "PASSWORD", "URL")
 HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "Mozilla/6.9 (X11; TempleOS x86_32; rv:139.0) Gecko/20100101 Firefox/139.0",
@@ -21,6 +21,7 @@ def build_parser():
     parser.add_argument("--username", help="CTFd username")
     parser.add_argument("--password", help="CTFd password")
     parser.add_argument("--session", help="Session cookie for CTFd")
+    parser.add_argument("--token", help="CTFd access token (Authorization: Token)")
     parser.add_argument("--url", default=None, help="Base URL of the CTFd instance")
     parser.add_argument(
         "--nofiles",
@@ -42,6 +43,11 @@ def build_parser():
         type=int,
         default=None,
         help="With --notifications, return notifications with a higher id",
+    )
+    parser.add_argument(
+        "--list-tokens",
+        action="store_true",
+        help="Print access token id, type, and expiration, then exit",
     )
     return parser
 
@@ -65,49 +71,81 @@ def login(url, username, password, http):
     login_url = f"{url}/login"
     login_page = session.get(login_url)
     soup = BeautifulSoup(login_page.text, "html.parser")
-    nonce = soup.find("input", {"name": "nonce"})["value"]
-    data = {"name": username, "password": password, "nonce": nonce}
-    session.post(
+    nonce_tag = soup.find("input", {"name": "nonce"})
+    if nonce_tag is None or not nonce_tag.get("value"):
+        print("[-] CTFd login page did not include a nonce.")
+        raise SystemExit(1)
+    response = session.post(
         login_url,
-        data=data,
+        data={"name": username, "password": password, "nonce": nonce_tag["value"]},
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         allow_redirects=False,
     )
+    if response.status_code not in (302, 303) or "session" not in session.cookies:
+        print(f"[-] CTFd login failed ({response.status_code}).")
+        raise SystemExit(1)
     return session.cookies.get_dict()
 
 
+def resolve_url(args, env):
+    if args.url:
+        return args.url.rstrip("/")
+    if env.get("URL"):
+        return env["URL"].rstrip("/")
+    if args.token or args.session or args.username or args.password:
+        return DEFAULT_URL
+    print("[-] CTFD_TOKEN, SESSION, or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
+    raise SystemExit(1)
+
+
+def credentials_from(args, env):
+    """CLI credentials replace .env. Token, then session, then username and password."""
+    if args.token or args.session or args.username or args.password:
+        return args.token, args.session, args.username, args.password, "cli"
+    token = env.get("CTFD_TOKEN")
+    return token, env.get("SESSION"), env.get("USERNAME"), env.get("PASSWORD"), "env"
+
+
 def resolve_auth(args, env, http):
-    """CLI credentials win. Otherwise use SESSION, then USERNAME and PASSWORD."""
-    if args.session:
-        url = (args.url or env.get("URL") or DEFAULT_URL).rstrip("/")
-        print("[+] Using session cookie")
-        return url, {"session": args.session}
-    if args.username or args.password:
-        if not args.username or not args.password:
+    url = resolve_url(args, env)
+    token, session_cookie, username, password, source = credentials_from(args, env)
+    suffix = " from .env file" if source == "env" else ""
+    if token:
+        print(f"[+] Using access token{suffix}")
+        return url, {"Authorization": f"Token {token}"}, None
+    if session_cookie:
+        print(f"[+] Using session cookie{suffix}")
+        return url, {}, {"session": session_cookie}
+    if username or password:
+        if not username or not password:
             print("[-] Either --session or both --username and --password are required.")
             raise SystemExit(1)
-        url = (args.url or env.get("URL") or DEFAULT_URL).rstrip("/")
-        print("[+] Using username and password")
-        return url, login(url, args.username, args.password, http)
-    if env.get("SESSION"):
-        if not (args.url or env.get("URL")):
-            print("[-] Either SESSION or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
-            raise SystemExit(1)
-        url = (args.url or env["URL"]).rstrip("/")
-        print("[+] Using session cookie from .env file")
-        return url, {"session": env["SESSION"]}
-    if env.get("USERNAME") and env.get("PASSWORD"):
-        if not (args.url or env.get("URL")):
-            print("[-] Either SESSION or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
-            raise SystemExit(1)
-        url = (args.url or env["URL"]).rstrip("/")
-        print("[+] Using username and password from .env file")
-        return url, login(url, env["USERNAME"], env["PASSWORD"], http)
-    if env:
-        print("[-] Either SESSION or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
+        print(f"[+] Using username and password{suffix}")
+        return url, {}, login(url, username, password, http)
+    if source == "env":
+        print("[-] CTFD_TOKEN, SESSION, or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
     else:
-        print("[-] Either --session or both --username and --password are required.")
+        print("[-] Either --token, --session, or both --username and --password are required.")
     raise SystemExit(1)
+
+
+def api_get(http, url, headers, cookies, params=None):
+    kwargs = {"headers": headers}
+    if cookies:
+        kwargs["cookies"] = cookies
+    if params:
+        kwargs["params"] = params
+    return http.get(url, **kwargs)
+
+
+def list_tokens(url, headers, cookies, http):
+    response = api_get(http, f"{url}/api/v1/tokens", headers, cookies)
+    if response.status_code != 200:
+        print(f"[-] Failed to retrieve tokens: {response.status_code} - {response.text}")
+        raise SystemExit(1)
+    print("id\ttype\texpiration")
+    for row in response.json().get("data") or []:
+        print(f"{row.get('id', '')}\t{row.get('type', '')}\t{row.get('expiration', '')}")
 
 
 def description_text(challenge):
@@ -119,8 +157,8 @@ def description_text(challenge):
     )
 
 
-def scrape_challenges(url, cookies, nofiles, nooverwrite, output_dir, http):
-    response = http.get(f"{url}/api/v1/challenges", headers=HEADERS, cookies=cookies)
+def scrape_challenges(url, headers, cookies, nofiles, nooverwrite, output_dir, http):
+    response = api_get(http, f"{url}/api/v1/challenges", headers, cookies)
     if response.status_code == 403:
         print(f"[-] Access forbidden. ERROR: {response.json()['message']}")
         raise SystemExit(1)
@@ -131,11 +169,7 @@ def scrape_challenges(url, cookies, nofiles, nooverwrite, output_dir, http):
     challenges = response.json()["data"]
     print("[+] Challenges retrieved successfully.")
     for challenge in challenges:
-        detail = http.get(
-            f"{url}/api/v1/challenges/{challenge['id']}",
-            cookies=cookies,
-            headers=HEADERS,
-        )
+        detail = api_get(http, f"{url}/api/v1/challenges/{challenge['id']}", headers, cookies)
         if detail.status_code != 200:
             print(
                 f"[-] Failed to retrieve challenge data for {challenge['id']}: "
@@ -163,7 +197,7 @@ def scrape_challenges(url, cookies, nofiles, nooverwrite, output_dir, http):
             continue
 
         for file_url in chall_data["files"]:
-            file_data = http.get(f"{url}{file_url}", headers=HEADERS, cookies=cookies)
+            file_data = api_get(http, f"{url}{file_url}", headers, cookies)
             if file_data.status_code != 200:
                 print(
                     f"[-] Failed to download {file_url} for challenge {challenge['name']}: "
@@ -214,12 +248,9 @@ def notifications_markdown(records):
     return "\n".join(lines)
 
 
-def write_notifications(url, cookies, output_dir, http, since_id, now):
+def write_notifications(url, headers, cookies, output_dir, http, since_id, now):
     params = {"since_id": since_id} if since_id is not None else None
-    kwargs = {"headers": HEADERS, "cookies": cookies}
-    if params:
-        kwargs["params"] = params
-    response = http.get(f"{url}/api/v1/notifications", **kwargs)
+    response = api_get(http, f"{url}/api/v1/notifications", headers, cookies, params)
     if response.status_code != 200:
         print(f"[-] Failed to retrieve notifications: {response.status_code} - {response.text}")
         raise SystemExit(1)
@@ -239,11 +270,17 @@ def write_notifications(url, cookies, output_dir, http, since_id, now):
 def main(argv=None, env_path=".env", output_dir="output", http=requests, now=None):
     args = build_parser().parse_args(argv)
     env = read_env(env_path)
-    url, cookies = resolve_auth(args, env, http)
-    scrape_challenges(url, cookies, args.nofiles, args.nooverwrite, output_dir, http)
+    url, extra_headers, cookies = resolve_auth(args, env, http)
+    headers = dict(HEADERS)
+    headers.update(extra_headers)
+    if args.list_tokens:
+        list_tokens(url, headers, cookies, http)
+        return
+    scrape_challenges(url, headers, cookies, args.nofiles, args.nooverwrite, output_dir, http)
     if args.notifications:
         write_notifications(
             url,
+            headers,
             cookies,
             output_dir,
             http,
