@@ -225,6 +225,18 @@ class ScoreboardTests(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(tmp, "scoreboard.json")))
             self.assertTrue(os.path.exists(os.path.join(tmp, "web", "Hello", "description.md")))
 
+    def test_admins_only_scoreboard_warns_when_challenges_were_requested(self):
+        http = FakeHTTP(routes(404, {"message": "Not Found"}))
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+            )
+            self.assertFalse(os.path.exists(os.path.join(tmp, "scoreboard.json")))
+            self.assertTrue(os.path.exists(os.path.join(tmp, "web", "Hello", "description.md")))
+
     def test_hidden_scoreboard_exits_when_it_is_the_only_request(self):
         http = FakeHTTP({"https://ctf.example/api/v1/scoreboard": Response(403, {"message": "hidden"})})
         with tempfile.TemporaryDirectory() as tmp:
@@ -238,6 +250,19 @@ class ScoreboardTests(unittest.TestCase):
                 )
         self.assertEqual(caught.exception.code, 1)
         self.assertEqual(http.calls, ["https://ctf.example/api/v1/scoreboard"])
+
+    def test_admins_only_scoreboard_exits_when_it_is_the_only_request(self):
+        http = FakeHTTP({"https://ctf.example/api/v1/scoreboard": Response(404, text="missing")})
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as caught:
+                main.main(
+                    ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
+                    env_path=os.path.join(tmp, "missing.env"),
+                    output_dir=tmp,
+                    http=http,
+                    challenges_requested=False,
+                )
+        self.assertEqual(caught.exception.code, 1)
 
     def test_env_file_still_honors_scoreboard_flag(self):
         http = FakeHTTP(routes())

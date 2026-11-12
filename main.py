@@ -214,14 +214,18 @@ def response_message(response):
 
 
 def scoreboard_rows(response, challenges_requested):
-    """Return standings, or None when a hidden board should not fail the run."""
+    """Return standings, or None when score visibility should not fail the run."""
     if response.status_code == 200:
         payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
         return data if isinstance(data, list) else []
     message = response_message(response)
-    if response.status_code == 403 and challenges_requested:
-        print(f"[-] Scoreboard is hidden ({message}). Continuing because challenges were also requested.")
+    # Private and Hidden return 403. Admins Only returns 404. See score visibility docs.
+    if response.status_code in (403, 404) and challenges_requested:
+        print(
+            f"[-] Scoreboard is not visible to this account ({message}). "
+            "Continuing because challenges were also requested."
+        )
         return None
     print(f"[-] Failed to retrieve scoreboard: {response.status_code} - {message}")
     raise SystemExit(1)
