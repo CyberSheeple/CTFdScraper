@@ -83,6 +83,8 @@ python3 main.py \
 
 * `--nofiles` – Skip downloading files, just save challenge descriptions.
 * `--nooverwrite` – Don't overwrite existing `description.md` files.
+* `--notifications` – Also save CTFd announcements. Works with `.env` or command-line credentials.
+* `--since-id N` – With `--notifications`, ask for announcements whose id is greater than N.
 
 ---
 
@@ -92,6 +94,8 @@ All content will be saved under the `output/` directory like this:
 
 ```
 output/
+├── notifications.json    # with --notifications
+├── notifications.md      # with --notifications
 └── category/
     └── challenge_name/
         ├── description.md
