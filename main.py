@@ -22,8 +22,16 @@ def build_parser():
     parser.add_argument("--password", help="CTFd password")
     parser.add_argument("--session", help="Session cookie for CTFd")
     parser.add_argument("--url", default=None, help="Base URL of the CTFd instance")
-    parser.add_argument("--nofiles", default=False, help="Skip downloading files, only download challenge descriptions")
-    parser.add_argument("--nooverwrite", default=False, help="Skip overwriting existing files")
+    parser.add_argument(
+        "--nofiles",
+        action="store_true",
+        help="Skip downloading files, only download challenge descriptions",
+    )
+    parser.add_argument(
+        "--nooverwrite",
+        action="store_true",
+        help="Skip overwriting existing description.md files",
+    )
     parser.add_argument(
         "--notifications",
         action="store_true",
@@ -39,6 +47,7 @@ def build_parser():
 
 
 def read_env(env_path):
+    """Return .env values without overriding variables already in the process."""
     if not env_path or not os.path.exists(env_path):
         return {}
     file_values = {key: value for key, value in dotenv_values(env_path).items() if value is not None}
@@ -68,6 +77,7 @@ def login(url, username, password, http):
 
 
 def resolve_auth(args, env, http):
+    """CLI credentials win. Otherwise use SESSION, then USERNAME and PASSWORD."""
     if args.session:
         url = (args.url or env.get("URL") or DEFAULT_URL).rstrip("/")
         print("[+] Using session cookie")
@@ -109,7 +119,7 @@ def description_text(challenge):
     )
 
 
-def scrape_challenges(url, cookies, output_dir, http):
+def scrape_challenges(url, cookies, nofiles, nooverwrite, output_dir, http):
     response = http.get(f"{url}/api/v1/challenges", headers=HEADERS, cookies=cookies)
     if response.status_code == 403:
         print(f"[-] Access forbidden. ERROR: {response.json()['message']}")
@@ -137,10 +147,10 @@ def scrape_challenges(url, cookies, output_dir, http):
         path = os.path.join(output_dir, chall_data["category"], chall_data["name"])
         os.makedirs(path, exist_ok=True)
         description_path = os.path.join(path, "description.md")
-        if os.path.exists(description_path) and False:  # args.nooverwrite
+        if os.path.exists(description_path) and nooverwrite:
             print(
                 f"[-] Description file already exists for challenge {challenge['name']}. "
-                "Use --nooverwrite to skip this check."
+                "Skipping because --nooverwrite is set."
             )
             continue
 
@@ -148,7 +158,7 @@ def scrape_challenges(url, cookies, output_dir, http):
             desc_file.write(description_text(chall_data))
         print(f"[+] Created description file for challenge {challenge['name']} at {description_path}")
 
-        if False:  # args.nofiles
+        if nofiles:
             print(f"[-] Skipping file downloads for challenge {challenge['name']} as --nofiles is set.")
             continue
 
@@ -230,7 +240,7 @@ def main(argv=None, env_path=".env", output_dir="output", http=requests, now=Non
     args = build_parser().parse_args(argv)
     env = read_env(env_path)
     url, cookies = resolve_auth(args, env, http)
-    scrape_challenges(url, cookies, output_dir, http)
+    scrape_challenges(url, cookies, args.nofiles, args.nooverwrite, output_dir, http)
     if args.notifications:
         write_notifications(
             url,
