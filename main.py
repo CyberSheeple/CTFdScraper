@@ -233,18 +233,103 @@ def scoreboard_rows(response, challenges_requested):
     raise SystemExit(1)
 
 
-def scoreboard_detail(response):
-    """Return the top-score graph payload, or None when the endpoint did not succeed."""
+def payload_data(response):
     if response.status_code != 200:
         return None
-    payload = response.json()
-    data = payload.get("data") if isinstance(payload, dict) else None
-    return data if isinstance(data, dict) else {}
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload.get("data")
 
 
-def fetch_scoreboard_top(url, headers, cookies, http, rows):
-    """Top-10 graph for the whole board, plus one graph per bracket on the board."""
-    response = api_get(http, f"{url}/api/v1/scoreboard/top/10", headers, cookies)
+def scoreboard_detail(response):
+    """Return a place-keyed graph payload, or None when the endpoint did not succeed."""
+    data = payload_data(response)
+    return data if isinstance(data, dict) else None
+
+
+def list_data(response):
+    data = payload_data(response)
+    return data if isinstance(data, list) else None
+
+
+def fetch_viewer(url, headers, cookies, http, rows):
+    """Identify the signed-in user so the rivals window can be centered on them."""
+    response = api_get(http, f"{url}/api/v1/users/me", headers, cookies)
+    data = payload_data(response)
+    if not isinstance(data, dict) or data.get("id") is None:
+        return None
+    account_type = ""
+    for row in rows:
+        if row.get("account_type"):
+            account_type = str(row["account_type"]).lower()
+            break
+    account_id = data.get("team_id") if account_type == "team" else data.get("id")
+    return {
+        "user_id": data.get("id"),
+        "name": data.get("name") or "",
+        "team_id": data.get("team_id"),
+        "account_id": account_id,
+        "account_type": account_type or "user",
+    }
+
+
+def remember_series(series, detail):
+    if not isinstance(detail, dict):
+        return
+    for place in detail.values():
+        if not isinstance(place, dict) or place.get("id") is None:
+            continue
+        series[str(place["id"])] = {
+            "id": place.get("id"),
+            "name": place.get("name") or "",
+            "solves": place.get("solves") or [],
+        }
+
+
+def points_from_history(solves, awards):
+    points = []
+    for solve in solves or []:
+        if not isinstance(solve, dict):
+            continue
+        challenge = solve.get("challenge") if isinstance(solve.get("challenge"), dict) else {}
+        value = challenge.get("value", solve.get("value"))
+        if solve.get("date") is None or value is None:
+            continue
+        points.append({"value": value, "date": solve["date"]})
+    for award in awards or []:
+        if not isinstance(award, dict) or award.get("date") is None or award.get("value") is None:
+            continue
+        points.append({"value": award["value"], "date": award["date"]})
+    points.sort(key=lambda item: str(item["date"]))
+    return points
+
+
+def fetch_account_series(url, headers, cookies, http, row):
+    account_id = row.get("account_id")
+    kind = "teams" if str(row.get("account_type") or "").lower() == "team" else "users"
+    solves = list_data(api_get(http, f"{url}/api/v1/{kind}/{account_id}/solves", headers, cookies))
+    awards = list_data(api_get(http, f"{url}/api/v1/{kind}/{account_id}/awards", headers, cookies))
+    if solves is None and awards is None:
+        return None
+    return {
+        "id": account_id,
+        "name": row.get("name") or "",
+        "solves": points_from_history(solves or [], awards or []),
+    }
+
+
+def fetch_scoreboard_graphs(url, headers, cookies, http, rows):
+    """Top graphs, plus per-account history for the rivals and full graphs.
+
+    CTFd's ``/scoreboard/top/<count>`` stops at 50. Accounts outside that slice are
+    filled from their public solves and awards.
+    """
+    series = {}
+    response = api_get(http, f"{url}/api/v1/scoreboard/top/50", headers, cookies)
     detail = scoreboard_detail(response)
     if detail is None:
         print(
@@ -252,6 +337,7 @@ def fetch_scoreboard_top(url, headers, cookies, http, rows):
             "The offline scoreboard will list standings only."
         )
         detail = {}
+    remember_series(series, detail)
     brackets = {}
     seen = []
     for row in rows:
@@ -274,7 +360,20 @@ def fetch_scoreboard_top(url, headers, cookies, http, rows):
             )
             continue
         brackets[str(bracket_id)] = bracket_detail
-    return {"all": detail, "brackets": brackets}
+        remember_series(series, bracket_detail)
+    missing = 0
+    for row in rows:
+        account_id = row.get("account_id")
+        if account_id is None or str(account_id) in series:
+            continue
+        account_series = fetch_account_series(url, headers, cookies, http, row)
+        if account_series is None:
+            missing += 1
+            continue
+        series[str(account_id)] = account_series
+    if missing:
+        print(f"[-] Score history is unavailable for {missing} accounts. Those lines are omitted from the graph.")
+    return {"top": {"all": detail, "brackets": brackets}, "series": series}
 
 
 SCOREBOARD_HTML = """<!DOCTYPE html>
@@ -290,16 +389,18 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
   header { padding-bottom: 0; }
   h1 { margin: 0 0 .25rem; }
   .meta { margin: 0; opacity: .7; }
-  .pills { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
-  .pills button { border: 1px solid #888; background: transparent; border-radius: 999px; padding: .35rem .8rem; cursor: pointer; }
-  .pills button.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  .tabs, .pills, .pager { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 1rem 0; }
+  .tabs button, .pills button, .pager button { border: 1px solid #888; background: transparent; border-radius: 999px; padding: .35rem .8rem; cursor: pointer; }
+  .tabs button.active, .pills button.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  .note { margin: 0 0 1rem; opacity: .75; }
   svg { width: 100%; height: 320px; display: block; }
-  .legend { display: flex; flex-wrap: wrap; gap: .75rem 1rem; margin: .5rem 0 1rem; font-size: .9rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: .75rem 1rem; max-height: 8rem; overflow: auto; margin: .5rem 0 1rem; font-size: .9rem; }
   .swatch { display: inline-block; width: .75rem; height: .75rem; margin-right: .35rem; vertical-align: middle; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: .55rem .7rem; text-align: center; }
   td.name, th.name { text-align: left; }
   tbody tr:nth-child(even) { background: rgba(127, 127, 127, .12); }
+  tbody tr.self { background: rgba(31, 111, 235, .22); }
   .badge { display: inline-block; margin-left: .5rem; padding: .05rem .4rem; border-radius: .4rem; background: rgba(127, 127, 127, .25); font-size: .8rem; }
   .members { display: block; opacity: .7; font-size: .85rem; }
   .empty { text-align: center; opacity: .7; }
@@ -311,9 +412,12 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
   <p class="meta" id="fetched"></p>
 </header>
 <main>
+  <div id="tabs" class="tabs"></div>
   <div id="graph"></div>
   <div id="pills" class="pills"></div>
+  <p id="note" class="note"></p>
   <div id="board"></div>
+  <div id="pager" class="pager"></div>
 </main>
 <script type="application/json" id="scoreboard-data">/*SCOREBOARD*/</script>
 <script>
@@ -321,6 +425,9 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
   var data = JSON.parse(document.getElementById("scoreboard-data").textContent);
   var standings = data.data || [];
   var active = null;
+  var view = "top";
+  var page = 0;
+  var PAGE_SIZE = 25;
 
   function text(parent, value) {
     parent.appendChild(document.createTextNode(value == null ? "" : String(value)));
@@ -344,25 +451,58 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
     return list;
   }
 
-  function visible() {
+  function filtered() {
     return standings.filter(function (row) {
       return active == null || String(row.bracket_id) === String(active);
     });
   }
 
+  function rivalWindow(rows) {
+    var viewer = data.viewer;
+    if (!viewer || viewer.account_id == null) {
+      return {rows: [], reason: "This snapshot has no signed-in team or user, so the rivals window is unavailable."};
+    }
+    var index = -1;
+    var i;
+    for (i = 0; i < rows.length; i++) {
+      if (String(rows[i].account_id) === String(viewer.account_id)) index = i;
+    }
+    if (index < 0) return {rows: [], reason: "Your account is not on this scoreboard."};
+    return {
+      rows: rows.slice(Math.max(0, index - 5), Math.min(rows.length, index + 6)),
+      reason: "Five places above and below " + (viewer.name || "you") + "."
+    };
+  }
+
+  function selection() {
+    var rows = filtered();
+    if (view === "top") return {rows: rows.slice(0, 10), reason: ""};
+    if (view === "rivals") return rivalWindow(rows);
+    return {rows: rows, reason: ""};
+  }
+
+  function lineFrom(place) {
+    if (!place) return null;
+    var total = 0;
+    var points = (place.solves || []).map(function (solve) {
+      total += Number(solve.value) || 0;
+      return {t: Date.parse(solve.date), y: total};
+    }).filter(function (point) { return !isNaN(point.t); });
+    if (!points.length) return null;
+    return {name: place.name || "", color: color((place.name || "") + (place.id || "")), points: points};
+  }
+
   function series() {
-    var top = data.top || {};
-    var places = active == null ? top.all : (top.brackets || {})[String(active)];
-    if (!places) return [];
-    return Object.keys(places).map(function (key) {
-      var place = places[key] || {};
-      var total = 0;
-      var points = (place.solves || []).map(function (solve) {
-        total += Number(solve.value) || 0;
-        return {t: Date.parse(solve.date), y: total};
-      }).filter(function (point) { return !isNaN(point.t); });
-      return {name: place.name || "", color: color((place.name || "") + (place.id || "")), points: points};
-    }).filter(function (item) { return item.points.length; });
+    var chosen = selection().rows;
+    if (view === "top") {
+      var top = data.top || {};
+      var places = active == null ? (top.all || {}) : ((top.brackets || {})[String(active)] || {});
+      var keys = Object.keys(places).sort(function (a, b) { return Number(a) - Number(b); }).slice(0, 10);
+      return keys.map(function (key) { return lineFrom(places[key]); }).filter(Boolean);
+    }
+    return chosen.map(function (row) {
+      return lineFrom((data.series || {})[String(row.account_id)]);
+    }).filter(Boolean);
   }
 
   function svgEl(name) {
@@ -399,7 +539,7 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
     svg.setAttribute("viewBox", "0 0 " + width + " " + height);
     svg.setAttribute("role", "img");
     var label = svgEl("title");
-    text(label, "Top scores over time");
+    text(label, view === "top" ? "Top 10 scores" : view === "rivals" ? "Rivals" : "Full scoreboard");
     svg.appendChild(label);
     var axis = svgEl("path");
     axis.setAttribute("d", "M" + pad.left + " " + pad.top + "V" + (height - pad.bottom) + "H" + (width - pad.right));
@@ -438,15 +578,27 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
     host.appendChild(legend);
   }
 
+  function rankOf(row, rows) {
+    var i;
+    for (i = 0; i < rows.length; i++) if (rows[i] === row) return i + 1;
+    return "";
+  }
+
   function renderTable() {
     var host = document.getElementById("board");
-    var rows = visible();
+    var rows = filtered();
+    var chosen = selection();
+    var tableRows = chosen.rows;
+    if (view === "full") tableRows = chosen.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
     host.textContent = "";
-    if (!rows.length) {
+    var note = document.getElementById("note");
+    note.textContent = "";
+    if (chosen.reason) text(note, chosen.reason);
+    if (!tableRows.length) {
       var empty = document.createElement("p");
       empty.className = "empty";
-      text(empty, "Scoreboard is empty");
-      host.appendChild(empty);
+      text(empty, chosen.reason ? "" : "Scoreboard is empty");
+      if (!chosen.reason) host.appendChild(empty);
       return;
     }
     var table = document.createElement("table");
@@ -461,10 +613,14 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
     thead.appendChild(head);
     table.appendChild(thead);
     var body = document.createElement("tbody");
-    rows.forEach(function (row, index) {
+    tableRows.forEach(function (row) {
       var tr = document.createElement("tr");
+      var viewer = data.viewer;
+      if (viewer && viewer.account_id != null && String(row.account_id) === String(viewer.account_id)) {
+        tr.className = "self";
+      }
       var place = document.createElement("th");
-      text(place, index + 1);
+      text(place, rankOf(row, rows));
       var name = document.createElement("td");
       name.className = "name";
       text(name, row.name || "");
@@ -505,6 +661,7 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
       text(button, label);
       button.addEventListener("click", function () {
         active = id;
+        page = 0;
         render();
       });
       host.appendChild(button);
@@ -513,10 +670,55 @@ SCOREBOARD_HTML = """<!DOCTYPE html>
     items.forEach(function (item) { add(item.name, item.id); });
   }
 
+  function renderTabs() {
+    var host = document.getElementById("tabs");
+    host.textContent = "";
+    [["top", "Top 10"], ["rivals", "Rivals \u00b15"], ["full", "Full"]].forEach(function (item) {
+      var button = document.createElement("button");
+      button.type = "button";
+      if (view === item[0]) button.className = "active";
+      text(button, item[1]);
+      button.addEventListener("click", function () {
+        view = item[0];
+        page = 0;
+        render();
+      });
+      host.appendChild(button);
+    });
+  }
+
+  function renderPager() {
+    var host = document.getElementById("pager");
+    host.textContent = "";
+    if (view !== "full") return;
+    var total = selection().rows.length;
+    var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (page > pages - 1) page = pages - 1;
+    if (pages < 2) return;
+    function add(label, next, disabled) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.disabled = disabled;
+      text(button, label);
+      button.addEventListener("click", function () {
+        page = next;
+        render();
+      });
+      host.appendChild(button);
+    }
+    add("Previous", page - 1, page === 0);
+    var status = document.createElement("span");
+    text(status, "Page " + (page + 1) + " of " + pages);
+    host.appendChild(status);
+    add("Next", page + 1, page >= pages - 1);
+  }
+
   function render() {
+    renderTabs();
     renderGraph();
     renderPills();
     renderTable();
+    renderPager();
   }
 
   text(document.getElementById("fetched"), "Snapshot " + (data.fetched_at || ""));
@@ -553,10 +755,13 @@ def write_scoreboard(url, headers, cookies, output_dir, http, challenges_request
     if rows is None:
         return
     os.makedirs(output_dir, exist_ok=True)
+    graphs = fetch_scoreboard_graphs(url, headers, cookies, http, rows)
     document = {
         "fetched_at": now.isoformat(),
         "data": rows,
-        "top": fetch_scoreboard_top(url, headers, cookies, http, rows),
+        "viewer": fetch_viewer(url, headers, cookies, http, rows),
+        "top": graphs["top"],
+        "series": graphs["series"],
     }
     json_path = os.path.join(output_dir, "scoreboard.json")
     md_path = os.path.join(output_dir, "scoreboard.md")

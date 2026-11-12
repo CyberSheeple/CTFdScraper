@@ -172,7 +172,8 @@ def routes(scoreboard_status=200, scoreboard_payload=None):
         ),
         "https://ctf.example/files/abc/note.txt": Response(200, content=b"note"),
         "https://ctf.example/api/v1/scoreboard": Response(scoreboard_status, scoreboard_payload),
-        "https://ctf.example/api/v1/scoreboard/top/10": Response(
+        "https://ctf.example/api/v1/users/me": Response(401, text="no"),
+        "https://ctf.example/api/v1/scoreboard/top/50": Response(
             200,
             {
                 "success": True,
@@ -188,6 +189,10 @@ def routes(scoreboard_status=200, scoreboard_payload=None):
                     }
                 },
             },
+        ),
+        "https://ctf.example/api/v1/scoreboard/top/10": Response(
+            200,
+            {"success": True, "data": {"1": {"id": 9, "name": "BracketTop", "score": 10, "solves": []}}},
         ),
     }
 
@@ -221,9 +226,14 @@ class ScoreboardTests(unittest.TestCase):
             self.assertIn("renderGraph", html)
             self.assertNotIn("src=", html)
             self.assertEqual(document["top"]["all"]["1"]["name"], "Alpha|Team")
+            self.assertIn("Top 10", html)
+            self.assertIn("Rivals", html)
+            self.assertIn("Full", html)
+            self.assertIsNone(document["viewer"])
             self.assertTrue(os.path.exists(os.path.join(tmp, "web", "Hello", "description.md")))
             self.assertIn("https://ctf.example/api/v1/scoreboard", http.calls)
-            self.assertIn("https://ctf.example/api/v1/scoreboard/top/10", http.calls)
+            self.assertIn("https://ctf.example/api/v1/scoreboard/top/50", http.calls)
+            self.assertNotIn("https://ctf.example/api/v1/scoreboard/top/10", http.calls)
 
     def test_scoreboard_stays_off_without_the_flag(self):
         http = FakeHTTP(routes())
@@ -352,13 +362,13 @@ class ScoreboardTests(unittest.TestCase):
         top_calls = [call for call in http.requests if call["url"].endswith("/top/10")]
         self.assertEqual(
             [call["params"] for call in top_calls],
-            [None, {"bracket_id": 4}, {"bracket_id": 9}],
+            [{"bracket_id": 4}, {"bracket_id": 9}],
         )
 
     def test_missing_score_graph_still_writes_the_offline_page(self):
         payload = {"success": True, "data": ROWS}
         http = FakeHTTP(routes(200, payload))
-        http.routes["https://ctf.example/api/v1/scoreboard/top/10"] = Response(404, text="missing")
+        http.routes["https://ctf.example/api/v1/scoreboard/top/50"] = Response(404, text="missing")
         with tempfile.TemporaryDirectory() as tmp:
             main.main(
                 ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
@@ -371,6 +381,71 @@ class ScoreboardTests(unittest.TestCase):
                 document = json.load(handle)
             self.assertEqual(document["top"]["all"], {})
             self.assertTrue(os.path.exists(os.path.join(tmp, "scoreboard.html")))
+
+    def test_rivals_use_the_signed_in_account_and_fetch_missing_history(self):
+        rows = [
+            {"pos": 1, "account_id": 1, "account_type": "user", "name": "Ann", "score": 100},
+            {"pos": 2, "account_id": 2, "account_type": "user", "name": "Bea", "score": 40},
+        ]
+        http = FakeHTTP(routes(200, {"success": True, "data": rows}))
+        http.routes["https://ctf.example/api/v1/users/me"] = Response(
+            200, {"success": True, "data": {"id": 2, "name": "Bea", "team_id": None}}
+        )
+        http.routes["https://ctf.example/api/v1/users/2/solves"] = Response(
+            200,
+            {
+                "success": True,
+                "data": [{"date": "2026-11-12T00:00:00Z", "challenge": {"id": 1, "value": 40}}],
+            },
+        )
+        http.routes["https://ctf.example/api/v1/users/2/awards"] = Response(
+            200, {"success": True, "data": [{"date": "2026-11-12T02:00:00Z", "value": 5}]}
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+                now=NOW,
+            )
+            with open(os.path.join(tmp, "scoreboard.json"), encoding="utf-8") as handle:
+                document = json.load(handle)
+        self.assertEqual(document["viewer"]["account_id"], 2)
+        self.assertEqual(document["viewer"]["name"], "Bea")
+        self.assertEqual(
+            document["series"]["2"]["solves"],
+            [
+                {"value": 40, "date": "2026-11-12T00:00:00Z"},
+                {"value": 5, "date": "2026-11-12T02:00:00Z"},
+            ],
+        )
+        self.assertIn("https://ctf.example/api/v1/users/2/solves", http.calls)
+        self.assertNotIn("https://ctf.example/api/v1/users/1/solves", http.calls)
+
+    def test_team_mode_centers_rivals_on_the_team(self):
+        rows = [
+            {"pos": 1, "account_id": 7, "account_type": "team", "name": "Crew", "score": 10},
+        ]
+        http = FakeHTTP(routes(200, {"success": True, "data": rows}))
+        http.routes["https://ctf.example/api/v1/users/me"] = Response(
+            200, {"success": True, "data": {"id": 3, "name": "Ada", "team_id": 7}}
+        )
+        http.routes["https://ctf.example/api/v1/teams/7/solves"] = Response(200, {"success": True, "data": []})
+        http.routes["https://ctf.example/api/v1/teams/7/awards"] = Response(200, {"success": True, "data": []})
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+                now=NOW,
+            )
+            with open(os.path.join(tmp, "scoreboard.json"), encoding="utf-8") as handle:
+                document = json.load(handle)
+        self.assertEqual(document["viewer"]["account_id"], 7)
+        self.assertIn("https://ctf.example/api/v1/teams/7/solves", http.calls)
+        self.assertNotIn("https://ctf.example/api/v1/users/3/solves", http.calls)
 
 
 SECRET = "ctfd_super_secret_value"
