@@ -82,7 +82,9 @@ python3 main.py \
 ## 🧰 Extra Options
 
 * `--nofiles` – Skip downloading files, just save challenge descriptions.
-* `--nooverwrite` – Don't overwrite existing `description.md` files.
+* `--nooverwrite` – Don't overwrite an existing `description.md`, and skip that challenge's files.
+
+These flags apply whether you authenticate with `.env` or with command-line arguments.
 
 ---
 
