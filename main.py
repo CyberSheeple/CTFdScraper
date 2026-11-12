@@ -322,21 +322,43 @@ def fetch_account_series(url, headers, cookies, http, row):
     }
 
 
+def fetch_top_detail(url, headers, cookies, http, params=None):
+    """Return the largest graph CTFd will serve.
+
+    ``/scoreboard/top/<count>`` stops at 50. The core theme only asks for 10, so a
+    top-50 response is preferred and a top-10 response is the fallback.
+    """
+    last_status = None
+    for count in (50, 10):
+        response = api_get(
+            http,
+            f"{url}/api/v1/scoreboard/top/{count}",
+            headers,
+            cookies,
+            params=params,
+        )
+        detail = scoreboard_detail(response)
+        if detail is not None:
+            return detail, count
+        last_status = response.status_code
+    return None, last_status
+
+
 def fetch_scoreboard_graphs(url, headers, cookies, http, rows):
     """Top graphs, plus per-account history for the rivals and full graphs.
 
-    CTFd's ``/scoreboard/top/<count>`` stops at 50. Accounts outside that slice are
-    filled from their public solves and awards.
+    Accounts outside the top graph are filled from their public solves and awards.
     """
     series = {}
-    response = api_get(http, f"{url}/api/v1/scoreboard/top/50", headers, cookies)
-    detail = scoreboard_detail(response)
+    detail, count = fetch_top_detail(url, headers, cookies, http)
     if detail is None:
         print(
-            f"[-] Score graph is unavailable ({response.status_code}). "
+            f"[-] Score graph is unavailable ({count}). "
             "The offline scoreboard will list standings only."
         )
         detail = {}
+    elif count == 10:
+        print("[-] Top 50 score graph is unavailable. The graph uses the top 10.")
     remember_series(series, detail)
     brackets = {}
     seen = []
@@ -345,20 +367,21 @@ def fetch_scoreboard_graphs(url, headers, cookies, http, rows):
         if bracket_id is None or bracket_id in seen:
             continue
         seen.append(bracket_id)
-        bracket_response = api_get(
-            http,
-            f"{url}/api/v1/scoreboard/top/10",
+        bracket_detail, bracket_count = fetch_top_detail(
+            url,
             headers,
             cookies,
+            http,
             params={"bracket_id": bracket_id},
         )
-        bracket_detail = scoreboard_detail(bracket_response)
         if bracket_detail is None:
             print(
                 f"[-] Score graph for bracket {bracket_id} is unavailable "
-                f"({bracket_response.status_code})."
+                f"({bracket_count})."
             )
             continue
+        if bracket_count == 10:
+            print(f"[-] Bracket {bracket_id} graph is limited to the top 10.")
         brackets[str(bracket_id)] = bracket_detail
         remember_series(series, bracket_detail)
     missing = 0
@@ -410,6 +433,7 @@ def write_scoreboard(url, headers, cookies, output_dir, http, challenges_request
     os.makedirs(output_dir, exist_ok=True)
     graphs = fetch_scoreboard_graphs(url, headers, cookies, http, rows)
     document = {
+        "url": url,
         "fetched_at": now.isoformat(),
         "data": rows,
         "viewer": fetch_viewer(url, headers, cookies, http, rows),

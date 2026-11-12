@@ -5,42 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scoreboard</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { margin: 0; font-family: system-ui, sans-serif; line-height: 1.4; }
-  header, main { max-width: 960px; margin: 0 auto; padding: 1.25rem; }
-  header { padding-bottom: 0; }
-  h1 { margin: 0 0 .25rem; }
-  .meta { margin: 0; opacity: .7; }
-  .tabs, .pills, .pager { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 1rem 0; }
-  .tabs button, .pills button, .pager button { border: 1px solid #888; background: transparent; border-radius: 999px; padding: .35rem .8rem; cursor: pointer; }
-  .tabs button.active, .pills button.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
-  .note { margin: 0 0 1rem; opacity: .75; }
-  svg { width: 100%; height: 320px; display: block; }
-  .legend { display: flex; flex-wrap: wrap; gap: .75rem 1rem; max-height: 8rem; overflow: auto; margin: .5rem 0 1rem; font-size: .9rem; }
-  .swatch { display: inline-block; width: .75rem; height: .75rem; margin-right: .35rem; vertical-align: middle; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: .55rem .7rem; text-align: center; }
-  td.name, th.name { text-align: left; }
-  tbody tr:nth-child(even) { background: rgba(127, 127, 127, .12); }
-  tbody tr.self { background: rgba(31, 111, 235, .22); }
-  .badge { display: inline-block; margin-left: .5rem; padding: .05rem .4rem; border-radius: .4rem; background: rgba(127, 127, 127, .25); font-size: .8rem; }
-  .members { display: block; opacity: .7; font-size: .85rem; }
-  .empty { text-align: center; opacity: .7; }
+  :root { --bs-dark: #212529; --bs-primary: #0d6efd; --bs-secondary: #6c757d; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: #212529; font-family: "Lato", "Helvetica Neue", Arial, sans-serif; font-size: 16px; line-height: 1.5; }
+  a { color: var(--bs-primary); text-decoration: none; }
+  a:hover { color: #0a58ca; }
+  .jumbotron { background: var(--bs-dark); color: #fff; text-align: center; padding: 4rem 2rem; margin-bottom: 2rem; }
+  .jumbotron h1 { margin: 0; font-family: "Raleway", "Segoe UI", sans-serif; font-weight: 500; font-size: 2.5rem; letter-spacing: 2px; }
+  .jumbotron .meta { margin: .75rem 0 0; font-family: "Lato", "Helvetica Neue", Arial, sans-serif; letter-spacing: 0; font-size: .95rem; opacity: .7; }
+  .container { width: min(1140px, calc(100% - 24px)); margin: 0 auto; padding-bottom: 3rem; }
+  .jumbotron .container { padding-bottom: 0; }
+  .nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1rem; }
+  .nav-fill > button { flex: 1 1 auto; text-align: center; }
+  .nav-pills .nav-link { border: 0; border-radius: .375rem; background: transparent; color: var(--bs-primary); font: inherit; padding: .5rem 1rem; cursor: pointer; }
+  .nav-pills .nav-link:hover:not(.active) { background: rgba(13, 110, 253, .08); }
+  .nav-pills .nav-link.active { background: var(--bs-primary); color: #fff; }
+  #score-graph { margin-bottom: .5rem; }
+  #score-graph svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem 1rem; max-height: 7.5rem; overflow: auto; margin: 0 0 1.25rem; font-size: 12px; }
+  .legend i { display: inline-block; width: 14px; height: 14px; margin-right: .35rem; border-radius: 50%; vertical-align: -2px; }
+  .note { margin: 0 0 1rem; color: var(--bs-secondary); }
+  .table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .table > thead > tr > :first-child, .table > tbody > tr > :first-child { width: 12%; }
+  .table > thead > tr > :last-child, .table > tbody > tr > :last-child { width: 18%; }
+  .table > thead > tr > th { padding: .5rem; border-bottom: 2px solid #dee2e6; font-weight: 700; white-space: nowrap; }
+  .table > thead > tr > :first-child { padding-left: 1rem; }
+  .table tr > :not(:first-child) { text-align: center; }
+  .text-start { text-align: left !important; }
+  .text-center { text-align: center; }
+  .table > tbody > tr > th, .table > tbody > tr > td { padding: .8rem 1rem; border-bottom: 1px solid #dee2e6; vertical-align: middle; }
+  .table-striped > tbody > tr:nth-of-type(odd) > * { background: rgba(0, 0, 0, .05); }
+  .table > tbody > tr.table-active > * { background: rgba(13, 110, 253, .15); }
+  .badge { display: inline-block; margin-left: .5rem; padding: .35em .65em; border-radius: .375rem; background: var(--bs-secondary); color: #fff; font-size: .75em; font-weight: 700; line-height: 1; vertical-align: middle; }
+  .empty { margin: 1.5rem 0; color: var(--bs-secondary); font-size: 1.75rem; font-weight: 500; text-align: center; }
+  .pager { display: flex; gap: .5rem; align-items: center; justify-content: flex-end; margin: .5rem 0 1rem; }
+  .pager button { border: 1px solid var(--bs-secondary); border-radius: .375rem; background: #fff; color: var(--bs-secondary); font: inherit; padding: .375rem .75rem; cursor: pointer; }
+  .pager button:disabled { opacity: .45; cursor: default; }
 </style>
 </head>
 <body>
-<header>
-  <h1>Scoreboard</h1>
-  <p class="meta" id="fetched"></p>
-</header>
-<main>
-  <div id="tabs" class="tabs"></div>
-  <div id="graph"></div>
-  <div id="pills" class="pills"></div>
-  <p id="note" class="note"></p>
-  <div id="board"></div>
-  <div id="pager" class="pager"></div>
-</main>
+<div class="jumbotron">
+  <div class="container">
+    <h1>Scoreboard</h1>
+    <p class="meta" id="fetched"></p>
+  </div>
+</div>
+<div class="container">
+  <div id="score-graph"></div>
+  <div id="scoreboard" class="row">
+    <div id="views" class="nav nav-pills"></div>
+    <div id="brackets" class="nav nav-pills nav-fill"></div>
+    <p id="note" class="note"></p>
+    <div id="board"></div>
+    <div id="pager" class="pager"></div>
+  </div>
+</div>
 <script type="application/json" id="scoreboard-data">/*SCOREBOARD*/</script>
 <script>
 (function () {
@@ -50,16 +69,44 @@
   var view = "top";
   var page = 0;
   var PAGE_SIZE = 25;
+  var TOP_CAP = 50;
+  var initial = (location.hash || "").replace("#", "");
+  if (initial === "top" || initial === "rivals" || initial === "full") view = initial;
 
   function text(parent, value) {
     parent.appendChild(document.createTextNode(value == null ? "" : String(value)));
   }
 
-  function color(name) {
+  function colorHash(value) {
     var hash = 0;
     var i;
-    for (i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-    return "hsl(" + (hash % 360) + " 65% 45%)";
+    var hex;
+    for (i = 0; i < value.length; i++) {
+      hash = value.charCodeAt(i) + ((hash << 5) - hash);
+      hash = hash | 0;
+    }
+    var color = "#";
+    for (i = 0; i < 3; i++) {
+      hex = ((hash >> (i * 8)) & 255).toString(16);
+      color += hex.length < 2 ? "0" + hex : hex;
+    }
+    return color;
+  }
+
+  function modeWord() {
+    var kind = "";
+    var i;
+    for (i = 0; i < standings.length; i++) {
+      if (standings[i].account_type) {
+        kind = String(standings[i].account_type).toLowerCase();
+        break;
+      }
+    }
+    return kind === "team" ? "Team" : "User";
+  }
+
+  function plural(word) {
+    return word === "Team" ? "Teams" : "Users";
   }
 
   function brackets() {
@@ -96,9 +143,19 @@
     };
   }
 
+  function topPlaces() {
+    var top = data.top || {};
+    return active == null ? (top.all || {}) : ((top.brackets || {})[String(active)] || {});
+  }
+
+  function topCount() {
+    var count = Object.keys(topPlaces()).length;
+    return count ? Math.min(TOP_CAP, count) : TOP_CAP;
+  }
+
   function selection() {
     var rows = filtered();
-    if (view === "top") return {rows: rows.slice(0, 10), reason: ""};
+    if (view === "top") return {rows: rows.slice(0, topCount()), reason: ""};
     if (view === "rivals") return rivalWindow(rows);
     return {rows: rows, reason: ""};
   }
@@ -106,20 +163,26 @@
   function lineFrom(place) {
     if (!place) return null;
     var total = 0;
-    var points = (place.solves || []).map(function (solve) {
+    var solves = (place.solves || []).slice().sort(function (a, b) {
+      return String(a.date).localeCompare(String(b.date));
+    });
+    var points = solves.map(function (solve) {
       total += Number(solve.value) || 0;
       return {t: Date.parse(solve.date), y: total};
     }).filter(function (point) { return !isNaN(point.t); });
     if (!points.length) return null;
-    return {name: place.name || "", color: color((place.name || "") + (place.id || "")), points: points};
+    return {
+      name: place.name || "",
+      color: colorHash((place.name || "") + (place.id || "")),
+      points: points
+    };
   }
 
   function series() {
     var chosen = selection().rows;
     if (view === "top") {
-      var top = data.top || {};
-      var places = active == null ? (top.all || {}) : ((top.brackets || {})[String(active)] || {});
-      var keys = Object.keys(places).sort(function (a, b) { return Number(a) - Number(b); }).slice(0, 10);
+      var places = topPlaces();
+      var keys = Object.keys(places).sort(function (a, b) { return Number(a) - Number(b); }).slice(0, TOP_CAP);
       return keys.map(function (key) { return lineFrom(places[key]); }).filter(Boolean);
     }
     return chosen.map(function (row) {
@@ -127,18 +190,81 @@
     }).filter(Boolean);
   }
 
+  function graphTitle() {
+    var word = plural(modeWord());
+    if (view === "top") return "Top " + topCount() + " " + word;
+    if (view === "rivals") return "Rivals";
+    return "All " + word;
+  }
+
+  function accountHref(row) {
+    var href = row.account_url == null ? "" : String(row.account_url);
+    var origin = String(data.url || "").replace(/\/$/, "");
+    if (href.slice(0, 2) === "//") return "";
+    if (href.charAt(0) === "/") {
+      if (origin.indexOf("https://") !== 0 && origin.indexOf("http://") !== 0) return "";
+      return origin + href;
+    }
+    if (href.indexOf("https://") === 0 || href.indexOf("http://") === 0) return href;
+    return "";
+  }
+
   function svgEl(name) {
     return document.createElementNS("http://www.w3.org/2000/svg", name);
   }
 
+  function niceAxis(maxValue) {
+    var rough = (maxValue > 0 ? maxValue : 1) / 6;
+    var pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    var error = rough / pow;
+    var step = (error <= 1 ? 1 : error <= 2 ? 2 : error <= 5 ? 5 : 10) * pow;
+    var top = Math.ceil((maxValue > 0 ? maxValue : 1) / step) * step;
+    var ticks = [];
+    var value;
+    for (value = 0; value <= top + step / 2; value += step) ticks.push(value);
+    return {top: top, ticks: ticks};
+  }
+
+  function timeTicks(minT, maxT) {
+    var span = maxT - minT;
+    var day = 86400000;
+    var out = [];
+    if (span > 120 * day) {
+      var start = new Date(minT);
+      var month = start.getUTCMonth() - (start.getUTCMonth() % 3);
+      var cursor = Date.UTC(start.getUTCFullYear(), month, 1);
+      while (cursor < minT) cursor = Date.UTC(new Date(cursor).getUTCFullYear(), new Date(cursor).getUTCMonth() + 3, 1);
+      while (cursor <= maxT) {
+        out.push(cursor);
+        var next = new Date(cursor);
+        cursor = Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 3, 1);
+      }
+      return out.length ? out : [minT, maxT];
+    }
+    var count = 6;
+    var i;
+    for (i = 0; i < count; i++) out.push(minT + span * i / (count - 1));
+    return out;
+  }
+
+  function timeLabel(t, span) {
+    var date = new Date(t);
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    if (span > 120 * 86400000) {
+      if (date.getUTCMonth() === 0) return String(date.getUTCFullYear());
+      return months[date.getUTCMonth()];
+    }
+    return months[date.getUTCMonth()] + " " + date.getUTCDate();
+  }
+
   function renderGraph() {
-    var host = document.getElementById("graph");
+    var host = document.getElementById("score-graph");
     host.textContent = "";
     var lines = series();
     if (!lines.length) return;
-    var width = 800;
-    var height = 320;
-    var pad = {left: 52, right: 16, top: 16, bottom: 36};
+    var width = 960;
+    var height = 420;
+    var pad = {left: 72, right: 24, top: 48, bottom: 36};
     var minT = Infinity;
     var maxT = -Infinity;
     var maxY = 0;
@@ -149,25 +275,57 @@
         if (point.y > maxY) maxY = point.y;
       });
     });
-    if (minT === maxT) maxT = minT + 1;
-    if (maxY === 0) maxY = 1;
+    if (minT === maxT) maxT = minT + 86400000;
+    var axis = niceAxis(maxY);
+    var span = maxT - minT;
     function x(t) {
-      return pad.left + (t - minT) / (maxT - minT) * (width - pad.left - pad.right);
+      return pad.left + (t - minT) / span * (width - pad.left - pad.right);
     }
     function y(value) {
-      return pad.top + (1 - value / maxY) * (height - pad.top - pad.bottom);
+      return pad.top + (1 - value / axis.top) * (height - pad.top - pad.bottom);
     }
     var svg = svgEl("svg");
     svg.setAttribute("viewBox", "0 0 " + width + " " + height);
     svg.setAttribute("role", "img");
     var label = svgEl("title");
-    text(label, view === "top" ? "Top 10 scores" : view === "rivals" ? "Rivals" : "Full scoreboard");
+    text(label, graphTitle());
     svg.appendChild(label);
-    var axis = svgEl("path");
-    axis.setAttribute("d", "M" + pad.left + " " + pad.top + "V" + (height - pad.bottom) + "H" + (width - pad.right));
-    axis.setAttribute("fill", "none");
-    axis.setAttribute("stroke", "currentColor");
-    svg.appendChild(axis);
+    var title = svgEl("text");
+    title.setAttribute("x", String(width / 2));
+    title.setAttribute("y", "24");
+    title.setAttribute("text-anchor", "middle");
+    title.setAttribute("font-size", "18");
+    title.setAttribute("font-weight", "700");
+    title.setAttribute("fill", "#333");
+    text(title, graphTitle());
+    svg.appendChild(title);
+    axis.ticks.forEach(function (tick) {
+      var line = svgEl("line");
+      line.setAttribute("x1", String(pad.left));
+      line.setAttribute("x2", String(width - pad.right));
+      line.setAttribute("y1", String(y(tick)));
+      line.setAttribute("y2", String(y(tick)));
+      line.setAttribute("stroke", tick === 0 ? "#6e7079" : "#e0e6f1");
+      svg.appendChild(line);
+      var tickLabel = svgEl("text");
+      tickLabel.setAttribute("x", String(pad.left - 8));
+      tickLabel.setAttribute("y", String(y(tick) + 4));
+      tickLabel.setAttribute("text-anchor", "end");
+      tickLabel.setAttribute("font-size", "12");
+      tickLabel.setAttribute("fill", "#6e7079");
+      text(tickLabel, Math.round(tick).toLocaleString("en-US"));
+      svg.appendChild(tickLabel);
+    });
+    timeTicks(minT, maxT).forEach(function (tick) {
+      var tickLabel = svgEl("text");
+      tickLabel.setAttribute("x", String(x(tick)));
+      tickLabel.setAttribute("y", String(height - 12));
+      tickLabel.setAttribute("text-anchor", "middle");
+      tickLabel.setAttribute("font-size", "12");
+      tickLabel.setAttribute("fill", "#6e7079");
+      text(tickLabel, timeLabel(tick, span));
+      svg.appendChild(tickLabel);
+    });
     lines.forEach(function (line) {
       var path = svgEl("polyline");
       path.setAttribute("fill", "none");
@@ -178,20 +336,12 @@
       }).join(" "));
       svg.appendChild(path);
     });
-    var maxLabel = svgEl("text");
-    maxLabel.setAttribute("x", "4");
-    maxLabel.setAttribute("y", pad.top + 4);
-    maxLabel.setAttribute("font-size", "12");
-    maxLabel.setAttribute("fill", "currentColor");
-    text(maxLabel, String(maxY));
-    svg.appendChild(maxLabel);
     host.appendChild(svg);
     var legend = document.createElement("div");
     legend.className = "legend";
     lines.forEach(function (line) {
       var item = document.createElement("span");
-      var swatch = document.createElement("span");
-      swatch.className = "swatch";
+      var swatch = document.createElement("i");
       swatch.style.background = line.color;
       item.appendChild(swatch);
       text(item, line.name);
@@ -211,23 +361,27 @@
     var rows = filtered();
     var chosen = selection();
     var tableRows = chosen.rows;
-    if (view === "full") tableRows = chosen.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-    host.textContent = "";
     var note = document.getElementById("note");
+    host.textContent = "";
     note.textContent = "";
     if (chosen.reason) text(note, chosen.reason);
+    if (view === "full") tableRows = chosen.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
     if (!tableRows.length) {
-      var empty = document.createElement("p");
-      empty.className = "empty";
-      text(empty, chosen.reason ? "" : "Scoreboard is empty");
-      if (!chosen.reason) host.appendChild(empty);
+      if (!chosen.reason) {
+        var empty = document.createElement("h3");
+        empty.className = "empty";
+        text(empty, "Scoreboard is empty");
+        host.appendChild(empty);
+      }
       return;
     }
     var table = document.createElement("table");
+    table.className = "table table-striped align-middle";
     var head = document.createElement("tr");
-    ["Place", rows[0].account_type || "Account", "Score"].forEach(function (label, index) {
+    ["Place", modeWord(), "Score"].forEach(function (label, index) {
       var cell = document.createElement("th");
-      if (index === 1) cell.className = "name";
+      if (index === 0) cell.className = "text-center";
+      if (index === 1) cell.className = "text-start";
       text(cell, label);
       head.appendChild(cell);
     });
@@ -239,26 +393,24 @@
       var tr = document.createElement("tr");
       var viewer = data.viewer;
       if (viewer && viewer.account_id != null && String(row.account_id) === String(viewer.account_id)) {
-        tr.className = "self";
+        tr.className = "table-active";
       }
       var place = document.createElement("th");
+      place.scope = "row";
+      place.className = "text-center";
       text(place, rankOf(row, rows));
       var name = document.createElement("td");
-      name.className = "name";
-      text(name, row.name || "");
+      name.className = "text-start";
+      var href = accountHref(row);
+      var label = document.createElement(href ? "a" : "span");
+      if (href) label.setAttribute("href", href);
+      text(label, row.name || "");
+      name.appendChild(label);
       if (row.bracket_name) {
         var badge = document.createElement("span");
-        badge.className = "badge";
+        badge.className = "badge bg-secondary";
         text(badge, row.bracket_name);
         name.appendChild(badge);
-      }
-      if (row.members && row.members.length) {
-        var members = document.createElement("span");
-        members.className = "members";
-        text(members, row.members.map(function (member) {
-          return (member.name || "") + " (" + (member.score == null ? "" : member.score) + ")";
-        }).join(", "));
-        name.appendChild(members);
       }
       var score = document.createElement("td");
       text(score, row.score == null ? "" : row.score);
@@ -271,15 +423,15 @@
     host.appendChild(table);
   }
 
-  function renderPills() {
-    var host = document.getElementById("pills");
+  function renderBrackets() {
+    var host = document.getElementById("brackets");
     var items = brackets();
     host.textContent = "";
-    if (!items.length) return;
+    if (!items.length || !standings.length) return;
     function add(label, id) {
       var button = document.createElement("button");
       button.type = "button";
-      if (String(active) === String(id) || (active == null && id == null)) button.className = "active";
+      button.className = "nav-link" + ((active == null && id == null) || String(active) === String(id) ? " active" : "");
       text(button, label);
       button.addEventListener("click", function () {
         active = id;
@@ -292,17 +444,18 @@
     items.forEach(function (item) { add(item.name, item.id); });
   }
 
-  function renderTabs() {
-    var host = document.getElementById("tabs");
+  function renderViews() {
+    var host = document.getElementById("views");
     host.textContent = "";
-    [["top", "Top 10"], ["rivals", "Rivals ±5"], ["full", "Full"]].forEach(function (item) {
+    [["top", "Top " + topCount()], ["rivals", "Rivals ±5"], ["full", "Full"]].forEach(function (item) {
       var button = document.createElement("button");
       button.type = "button";
-      if (view === item[0]) button.className = "active";
+      button.className = "nav-link" + (view === item[0] ? " active" : "");
       text(button, item[1]);
       button.addEventListener("click", function () {
         view = item[0];
         page = 0;
+        if (history.replaceState) history.replaceState(null, "", "#" + view);
         render();
       });
       host.appendChild(button);
@@ -336,14 +489,14 @@
   }
 
   function render() {
-    renderTabs();
+    renderViews();
     renderGraph();
-    renderPills();
+    renderBrackets();
     renderTable();
     renderPager();
   }
 
-  text(document.getElementById("fetched"), "Snapshot " + (data.fetched_at || ""));
+  text(document.getElementById("fetched"), data.fetched_at ? "Snapshot " + data.fetched_at : "");
   render();
 })();
 </script>

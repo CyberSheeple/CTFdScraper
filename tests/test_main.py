@@ -213,6 +213,7 @@ class ScoreboardTests(unittest.TestCase):
             )
             with open(os.path.join(tmp, "scoreboard.json"), encoding="utf-8") as handle:
                 document = json.load(handle)
+            self.assertEqual(document["url"], "https://ctf.example")
             self.assertEqual(document["fetched_at"], NOW.isoformat())
             self.assertEqual(document["data"], ROWS)
             with open(os.path.join(tmp, "scoreboard.md"), encoding="utf-8") as handle:
@@ -226,7 +227,10 @@ class ScoreboardTests(unittest.TestCase):
             self.assertIn("renderGraph", html)
             self.assertNotIn("src=", html)
             self.assertEqual(document["top"]["all"]["1"]["name"], "Alpha|Team")
-            self.assertIn("Top 10", html)
+            self.assertIn("jumbotron", html)
+            self.assertIn("table-striped", html)
+            self.assertIn("TOP_CAP = 50", html)
+            self.assertIn("Top ", html)
             self.assertIn("Rivals", html)
             self.assertIn("Full", html)
             self.assertIsNone(document["viewer"])
@@ -359,9 +363,10 @@ class ScoreboardTests(unittest.TestCase):
         self.assertNotIn("<script>alert", html)
         self.assertIn("\\u003cscript", html)
         self.assertIn("Ada", html)
-        top_calls = [call for call in http.requests if call["url"].endswith("/top/10")]
+        top_calls = [call for call in http.requests if "/scoreboard/top/" in call["url"]]
+        self.assertTrue(all(call["url"].endswith("/top/50") for call in top_calls))
         self.assertEqual(
-            [call["params"] for call in top_calls],
+            [call["params"] for call in top_calls if call["params"]],
             [{"bracket_id": 4}, {"bracket_id": 9}],
         )
 
@@ -369,6 +374,7 @@ class ScoreboardTests(unittest.TestCase):
         payload = {"success": True, "data": ROWS}
         http = FakeHTTP(routes(200, payload))
         http.routes["https://ctf.example/api/v1/scoreboard/top/50"] = Response(404, text="missing")
+        http.routes["https://ctf.example/api/v1/scoreboard/top/10"] = Response(404, text="missing")
         with tempfile.TemporaryDirectory() as tmp:
             main.main(
                 ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
@@ -381,6 +387,22 @@ class ScoreboardTests(unittest.TestCase):
                 document = json.load(handle)
             self.assertEqual(document["top"]["all"], {})
             self.assertTrue(os.path.exists(os.path.join(tmp, "scoreboard.html")))
+
+    def test_score_graph_falls_back_to_top_10(self):
+        http = FakeHTTP(routes())
+        http.routes["https://ctf.example/api/v1/scoreboard/top/50"] = Response(404, text="missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--session", "cookie", "--url", "https://ctf.example", "--scoreboard"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+                now=NOW,
+            )
+            with open(os.path.join(tmp, "scoreboard.json"), encoding="utf-8") as handle:
+                document = json.load(handle)
+        self.assertEqual(document["top"]["all"]["1"]["name"], "BracketTop")
+        self.assertIn("https://ctf.example/api/v1/scoreboard/top/10", http.calls)
 
     def test_rivals_use_the_signed_in_account_and_fetch_missing_history(self):
         rows = [
