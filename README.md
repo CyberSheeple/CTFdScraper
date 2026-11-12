@@ -83,6 +83,7 @@ python3 main.py \
 
 * `--nofiles` – Skip downloading files, just save challenge descriptions.
 * `--nooverwrite` – Don't overwrite existing `description.md` files.
+* `--scoreboard` – Also save the standings. Works with `.env` or command-line credentials. A hidden scoreboard is a warning when challenges were downloaded too, and a failure when the scoreboard was the only request.
 
 ---
 
@@ -92,6 +93,8 @@ All content will be saved under the `output/` directory like this:
 
 ```
 output/
+├── scoreboard.json    # with --scoreboard
+├── scoreboard.md      # with --scoreboard
 └── category/
     └── challenge_name/
         ├── description.md
