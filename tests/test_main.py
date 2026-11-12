@@ -182,15 +182,26 @@ class TokenTests(unittest.TestCase):
             main.main([], env_path=env_path, output_dir=tmp, http=http)
         self.assertEqual(http.requests[0]["headers"]["Authorization"], f"Token {SECRET}")
 
-    def test_access_token_wins_over_session_in_env(self):
+    def test_ctfd_token_wins_over_session_in_env(self):
         http = FakeHTTP(challenge_routes(file_url="/files/abc/note.txt"))
         with tempfile.TemporaryDirectory() as tmp:
             env_path = os.path.join(tmp, ".env")
             with open(env_path, "w", encoding="utf-8") as handle:
-                handle.write(f"ACCESS_TOKEN={SECRET}\nSESSION=from-env\nURL=https://ctf.example\n")
+                handle.write(f"CTFD_TOKEN={SECRET}\nSESSION=from-env\nURL=https://ctf.example\n")
             main.main([], env_path=env_path, output_dir=tmp, http=http)
-        self.assertIn("Authorization", http.requests[0]["headers"])
+        self.assertEqual(http.requests[0]["headers"]["Authorization"], f"Token {SECRET}")
         self.assertIsNone(http.requests[0]["cookies"])
+
+    def test_access_token_env_name_is_ignored(self):
+        http = FakeHTTP(challenge_routes(file_url="/files/abc/note.txt"))
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            with open(env_path, "w", encoding="utf-8") as handle:
+                handle.write(f"ACCESS_TOKEN={SECRET}\nURL=https://ctf.example\n")
+            with self.assertRaises(SystemExit) as caught:
+                main.main([], env_path=env_path, output_dir=tmp, http=http)
+        self.assertEqual(caught.exception.code, 1)
+        self.assertEqual(http.calls, [])
 
     def test_list_tokens_prints_metadata_only_and_does_not_scrape(self):
         http = FakeHTTP(

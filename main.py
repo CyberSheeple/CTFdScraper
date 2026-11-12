@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from dotenv import dotenv_values
 
 DEFAULT_URL = "https://icoblue2025.ctfd.io"
-ENV_KEYS = ("ACCESS_TOKEN", "CTFD_TOKEN", "SESSION", "USERNAME", "PASSWORD", "URL")
+ENV_KEYS = ("CTFD_TOKEN", "SESSION", "USERNAME", "PASSWORD", "URL")
 HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "Mozilla/6.9 (X11; TempleOS x86_32; rv:139.0) Gecko/20100101 Firefox/139.0",
@@ -81,7 +81,7 @@ def resolve_url(args, env):
         return env["URL"].rstrip("/")
     if args.token or args.session or args.username or args.password:
         return DEFAULT_URL
-    print("[-] Either SESSION or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
+    print("[-] CTFD_TOKEN, SESSION, or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
     raise SystemExit(1)
 
 
@@ -89,7 +89,7 @@ def credentials_from(args, env):
     """CLI credentials replace .env. Token, then session, then username and password."""
     if args.token or args.session or args.username or args.password:
         return args.token, args.session, args.username, args.password, "cli"
-    token = env.get("ACCESS_TOKEN") or env.get("CTFD_TOKEN")
+    token = env.get("CTFD_TOKEN")
     return token, env.get("SESSION"), env.get("USERNAME"), env.get("PASSWORD"), "env"
 
 
@@ -110,7 +110,7 @@ def resolve_auth(args, env, http):
         print(f"[+] Using username and password{suffix}")
         return url, {}, login(url, username, password, http)
     if source == "env":
-        print("[-] Either SESSION or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
+        print("[-] CTFD_TOKEN, SESSION, or both USERNAME and PASSWORD must be set in the .env file. URL is also required.")
     else:
         print("[-] Either --token, --session, or both --username and --password are required.")
     raise SystemExit(1)
