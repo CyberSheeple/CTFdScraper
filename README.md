@@ -13,7 +13,7 @@
 A simple Python 3 tool to automatically download challenges and files from any CTFd instance.
 
 Supports:
-- Session cookie authentication **or** username/password login
+- Access token, session cookie, **or** username/password login
 - `.env` or CLI-based usage
 - Downloads challenge descriptions and files
 - Skips existing files if needed
@@ -46,11 +46,14 @@ You can either use a `.env` file **or** pass arguments via the command line.
 Create a `.env` file in the root folder:
 
 ```
+ACCESS_TOKEN=your_access_token           # preferred. CTFD_TOKEN is accepted too
 SESSION=your_session_cookie              # OR use USERNAME + PASSWORD below
 USERNAME=your_username
 PASSWORD=your_password
 URL=https://your-ctfd-url.com
 ```
+
+Create the token in CTFd under Settings, then Access Tokens. Requests send it as `Authorization: Token <value>` and keep `Content-Type: application/json`. CTFd only honors the token on JSON requests. The token is preferred over a session cookie, and over a username and password. Command-line credentials replace whatever is in `.env`.
 
 Then simply run:
 
@@ -75,6 +78,20 @@ Or with a session cookie:
 python3 main.py \
   --session your_session_cookie \
   --url https://your-ctfd-url.com
+```
+
+Or with an access token:
+
+```bash
+python3 main.py \
+  --token your_access_token \
+  --url https://your-ctfd-url.com
+```
+
+List token metadata (id, type, expiration) without downloading challenges. The secret value is not printed.
+
+```bash
+python3 main.py --token your_access_token --url https://your-ctfd-url.com --list-tokens
 ```
 
 ---

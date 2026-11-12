@@ -1,0 +1,183 @@
+import io
+import os
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from unittest import mock
+
+import main
+
+
+class Response:
+    def __init__(self, status_code, payload=None, content=b"", text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.content = content
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+class FakeHTTP:
+    def __init__(self, routes):
+        self.routes = routes
+        self.calls = []
+
+    def get(self, url, headers=None, cookies=None):
+        self.calls.append({"url": url, "headers": headers or {}, "cookies": cookies})
+        if url not in self.routes:
+            raise AssertionError(f"unexpected GET {url}")
+        return self.routes[url]
+
+
+def challenge_routes():
+    return {
+        "https://ctf.example/api/v1/challenges": Response(
+            200, {"data": [{"id": 7, "name": "Hello", "category": "web"}]}
+        ),
+        "https://ctf.example/api/v1/challenges/7": Response(
+            200,
+            {
+                "data": {
+                    "id": 7,
+                    "name": "Hello",
+                    "category": "web",
+                    "description": "Do the thing",
+                    "value": 50,
+                    "files": ["/files/abc/note.txt"],
+                }
+            },
+        ),
+        "https://ctf.example/files/abc/note.txt": Response(200, content=b"note"),
+    }
+
+
+SECRET = "ctfd_super_secret_value"
+
+
+class TokenTests(unittest.TestCase):
+    def test_token_sends_authorization_and_json_content_type(self):
+        http = FakeHTTP(challenge_routes())
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--token", SECRET, "--url", "https://ctf.example"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+            )
+            challenge_call = http.calls[0]
+            self.assertEqual(challenge_call["headers"]["Authorization"], f"Token {SECRET}")
+            self.assertEqual(challenge_call["headers"]["Content-Type"], "application/json")
+            self.assertIsNone(challenge_call["cookies"])
+            description = os.path.join(tmp, "web", "Hello", "description.md")
+            with open(description, encoding="utf-8") as handle:
+                self.assertIn("Do the thing", handle.read())
+
+    def test_cli_token_overrides_env_session(self):
+        http = FakeHTTP(challenge_routes())
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            with open(env_path, "w", encoding="utf-8") as handle:
+                handle.write("SESSION=from-env\nURL=https://ctf.example\n")
+            main.main(["--token", SECRET], env_path=env_path, output_dir=tmp, http=http)
+        self.assertEqual(http.calls[0]["headers"]["Authorization"], f"Token {SECRET}")
+        self.assertIsNone(http.calls[0]["cookies"])
+
+    def test_env_ctfd_token_used_when_cli_is_empty(self):
+        http = FakeHTTP(challenge_routes())
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            with open(env_path, "w", encoding="utf-8") as handle:
+                handle.write(f"CTFD_TOKEN={SECRET}\nURL=https://ctf.example\n")
+            main.main([], env_path=env_path, output_dir=tmp, http=http)
+        self.assertEqual(http.calls[0]["headers"]["Authorization"], f"Token {SECRET}")
+
+    def test_access_token_wins_over_session_in_env(self):
+        http = FakeHTTP(challenge_routes())
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            with open(env_path, "w", encoding="utf-8") as handle:
+                handle.write(f"ACCESS_TOKEN={SECRET}\nSESSION=from-env\nURL=https://ctf.example\n")
+            main.main([], env_path=env_path, output_dir=tmp, http=http)
+        self.assertIn("Authorization", http.calls[0]["headers"])
+        self.assertIsNone(http.calls[0]["cookies"])
+
+    def test_list_tokens_prints_metadata_only_and_does_not_scrape(self):
+        http = FakeHTTP(
+            {
+                "https://ctf.example/api/v1/tokens": Response(
+                    200,
+                    {
+                        "success": True,
+                        "data": [
+                            {
+                                "id": 4,
+                                "type": "user",
+                                "expiration": "2026-12-31",
+                                "value": SECRET,
+                                "description": "cli",
+                            }
+                        ],
+                    },
+                )
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                main.main(
+                    ["--token", SECRET, "--url", "https://ctf.example", "--list-tokens"],
+                    env_path=os.path.join(tmp, "missing.env"),
+                    output_dir=tmp,
+                    http=http,
+                )
+        output = buffer.getvalue()
+        self.assertIn("id\ttype\texpiration", output)
+        self.assertIn("4\tuser\t2026-12-31", output)
+        self.assertNotIn(SECRET, output)
+        self.assertEqual([call["url"] for call in http.calls], ["https://ctf.example/api/v1/tokens"])
+        self.assertEqual(http.calls[0]["headers"]["Content-Type"], "application/json")
+
+    def test_login_requires_redirect_and_session_cookie(self):
+        session = mock.Mock()
+        session.get.return_value = Response(200, text='<input name="nonce" value="abc">')
+        session.post.return_value = Response(200, text="nope")
+        session.cookies = {}
+        http = FakeHTTP({})
+        http.Session = mock.Mock(return_value=session)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as caught:
+                main.main(
+                    ["--username", "ada", "--password", "secret", "--url", "https://ctf.example"],
+                    env_path=os.path.join(tmp, "missing.env"),
+                    output_dir=tmp,
+                    http=http,
+                )
+        self.assertEqual(caught.exception.code, 1)
+
+    def test_login_success_scrapes_with_session_cookie(self):
+        session = mock.Mock()
+        session.get.return_value = Response(200, text='<input name="nonce" value="abc">')
+        session.post.return_value = Response(302)
+
+        class CookieJar(dict):
+            def get_dict(self):
+                return dict(self)
+
+        session.cookies = CookieJar(session="logged-in")
+        http = FakeHTTP(challenge_routes())
+        http.Session = mock.Mock(return_value=session)
+        with tempfile.TemporaryDirectory() as tmp:
+            main.main(
+                ["--username", "ada", "--password", "secret", "--url", "https://ctf.example"],
+                env_path=os.path.join(tmp, "missing.env"),
+                output_dir=tmp,
+                http=http,
+            )
+        self.assertEqual(http.calls[0]["cookies"], {"session": "logged-in"})
+        self.assertNotIn("Authorization", http.calls[0]["headers"])
+
+
+if __name__ == "__main__":
+    unittest.main()
