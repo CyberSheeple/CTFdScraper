@@ -1,10 +1,10 @@
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/python-3.7%2B-blue?logo=python&logoColor=white">
-  <img alt="License" src="https://img.shields.io/github/license/ha1fdan/CTFdScraper?color=blueviolet">
-  <img alt="Stars" src="https://img.shields.io/github/stars/ha1fdan/CTFdScraper?style=social">
-  <img alt="Last Commit" src="https://img.shields.io/github/last-commit/ha1fdan/CTFdScraper">
-  <img alt="Issues" src="https://img.shields.io/github/issues/ha1fdan/CTFdScraper">
-<img alt="PRs" src="https://img.shields.io/github/issues-pr/ha1fdan/CTFdScraper">
+  <img alt="License" src="https://img.shields.io/github/license/CyberSheeple/CTFdScraper?color=blueviolet">
+  <img alt="Stars" src="https://img.shields.io/github/stars/CyberSheeple/CTFdScraper?style=social">
+  <img alt="Last Commit" src="https://img.shields.io/github/last-commit/CyberSheeple/CTFdScraper">
+  <img alt="Issues" src="https://img.shields.io/github/issues/CyberSheeple/CTFdScraper">
+<img alt="PRs" src="https://img.shields.io/github/issues-pr/CyberSheeple/CTFdScraper">
 </p>
 
 
@@ -24,7 +24,7 @@ Supports:
 
 ```bash
 # Clone the repo
-git clone https://github.com/ha1fdan/CTFdScraper.git
+git clone https://github.com/CyberSheeple/CTFdScraper.git
 cd CTFdScraper
 
 # Set up a virtual environment (optional but recommended)
